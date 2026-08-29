@@ -1,24 +1,51 @@
 # pi-chatgpt
 
-Local MCP server that gives ChatGPT web Codex-like control of your computer.
-
-No browser automation. No DOM scraping. ChatGPT is already an MCP client —
-this just gives it tools.
+ChatGPT Plus as a coding agent on your machine. Your subscription pays for the
+inference — no API key, no credits, no per-token bill.
 
 ```
-ChatGPT web ──MCP connector──▶ OpenAI tunnel ──▶ pi-chatgpt (local)
-                                                    ├── shell
-                                                    ├── file_read
-                                                    └── file_write
+task ──▶ agent loop (local) ──▶ browser ──▶ ChatGPT Plus
+             ▲                                  │
+             └──── tool results ◀── shell/file/grep/git
 ```
+
+ChatGPT decides. Local code executes. The browser is just the wire.
 
 ## Quick start
 
 ```bash
 npm install
-node bin/cli.mjs test     # verify tools work
-node src/server.mjs       # start MCP server on stdio
+
+# Chromium with remote debugging, logged into ChatGPT Plus
+open -a Arc --args --remote-debugging-port=9222
+curl -s http://127.0.0.1:9222/json/version   # verify
+
+node bin/cli.mjs agent "write fizzbuzz.py in /tmp, run it, confirm the output"
 ```
+
+The loop prints each tool call as it happens and exits with a JSON trace of
+every step, argument, and result.
+
+## Tools
+
+| Tool | Description |
+|------|-------------|
+| `shell` | Execute a command, get stdout/stderr/exit code |
+| `file_read` | Read a file or list a directory |
+| `file_write` | Write a file (creates parents) |
+| `grep` | Recursive search with file/line results |
+| `git` | Git operations (status, diff, log, commit, etc.) |
+
+The protocol is a fenced JSON block per turn — `{"tool": ..., "args": ...}` in,
+tool result back, `{"done": "..."}` to finish. Angle-bracket tags do not
+survive markdown rendering; fences do.
+
+## Alternate path: native MCP connector
+
+The same tools are exposed as an MCP server (`node src/server.mjs`), reachable
+from ChatGPT web through an OpenAI tunnel. This inverts ownership — ChatGPT
+runs the loop natively — at the cost of a tunnel ID, a runtime API key, and a
+daemon.
 
 ## Connect to ChatGPT
 
@@ -68,7 +95,8 @@ git branch, and project markers — so ChatGPT knows what it's working on.
 ## Tests
 
 ```bash
-npm test
+npm test                       # 30 unit tests, no browser needed
+node bin/cli.mjs agent "..."   # live probe against ChatGPT Plus
 ```
 
 ## Prior art
@@ -89,10 +117,10 @@ This project takes the opposite approach from browser-automation tools:
 - **Codex itself** — the tool contract (shell, file read/write) that pi-chatgpt
   reimplements as a standalone MCP server.
 
-pi-chatgpt skips the browser layer entirely. ChatGPT natively supports MCP
-connectors (Plus/Pro/Business/Enterprise). The OpenAI tunnel makes a local
-stdio MCP server reachable. No Playwright, no Electron, no selector
-maintenance.
+pi-chatgpt keeps the browser layer minimal: one `ask()` primitive, no Codex
+API translation, no Electron shell. The tool contract lives in local code, so
+DOM drift can only break transport, never behavior. The MCP server path exists
+for anyone who prefers no browser at all.
 
 ## License
 
