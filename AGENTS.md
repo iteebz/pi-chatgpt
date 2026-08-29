@@ -2,75 +2,38 @@
 
 ## problem
 
-ChatGPT Plus gives unlimited GPT-5.6 Sol. The API charges per token.
-The goal is a local coding agent powered by the subscription, not the API.
+ChatGPT Plus gives unlimited GPT-5.6 Sol via the conversation interface.
+The Codex API and OpenAI API both meter usage (credits or tokens).
+No existing tool lets pi use the unlimited conversation path as an LLM backend.
 
-## discovery
+## objective
 
-Pi already solves this. The `openai-codex` provider in pi-ai authenticates
-via ChatGPT OAuth (same flow as Codex CLI), hits `chatgpt.com/backend-api`,
-and bills against the Plus subscription — zero API spend.
-
-```
-pi --model openai-codex/gpt-5.6-sol
-```
-
-That's it. Pi is the centralised harness. The LLM backend is swappable:
-
-| harness | provider | backend | billing |
-|---------|----------|---------|---------|
-| pi + pi-cc | `cc` (Claude Code) | Anthropic via claude binary | Max sub |
-| pi + openai-codex | `openai-codex` | ChatGPT via OAuth | Plus sub |
-| codex CLI | native | ChatGPT via OAuth | Plus sub |
-
-pi-cc is prior art: a pi extension that registers Claude Code as a provider.
-pi-chatgpt was scoped as an MCP server giving ChatGPT local tools, but the
-real need — pi as agent, ChatGPT as brain — is already built into pi-ai.
-
-## what pi-chatgpt becomes
-
-Not an MCP server. A **pi extension** (like pi-cc) that:
-
-1. Wraps `openai-codex` with distil-specific context (AGENTS.md, skills, vault)
-2. Provides a `pi-chatgpt` command or alias: `pi --model openai-codex/gpt-5.6-sol`
-3. Verifies zero API spend (subscription-only auth, no OPENAI_API_KEY fallback)
-
-The MCP tools (shell, file_read, file_write, grep, git) we built are
-redundant — pi already has all of these natively.
-
-## architecture
+Pi extension that wraps ChatGPT's conversation UI as an LLM provider.
+Browser automation against `backend-api/conversation` — the unlimited path.
 
 ```
 pi (local harness)
-  ├── pi-cc extension → Claude Code → Max sub
-  ├── openai-codex provider (built-in) → ChatGPT → Plus sub
-  └── pi-chatgpt extension (planned) → distil context + guardrails
-        └── delegates to openai-codex provider
+  └── pi-chatgpt extension
+        └── Playwright → ChatGPT web → backend-api/conversation
+              └── Plus subscription, unlimited Sol
 ```
 
-## references
+## prior art
 
-- `~/dev/fork/pi/packages/ai/src/auth/oauth/openai-codex.ts` — OAuth flow
-- `~/dev/fork/pi/packages/ai/src/providers/openai-codex.ts` — provider config
-- `~/dev/fork/pi-cc/` — prior art: pi extension wrapping a provider
-- `~/dev/fork/codex/codex-rs/chatgpt/` — Codex CLI's ChatGPT client (Rust)
-- `~/.codex/auth.json` — shared session tokens (auth_mode: chatgpt)
+- **pi-cc** — pi extension wrapping Claude Code as a provider (architecture reference)
+- **codex-chatgpt-web** — Playwright driving ChatGPT web (DOM interaction reference)
+- **agentify-desktop** — Electron + Playwright, multi-vendor (query/response loop reference)
 
-## verification
+## current state
 
-```bash
-# Confirm subscription auth, not API key
-pi auth print-bearer-token --provider openai-codex
-# JWT contains chatgpt_plan_type: "plus" — subscription, not API
+- MCP server with 5 tools (shell, file_read, file_write, grep, git) — 21 tests passing.
+  Useful if ChatGPT drives the loop, but not the goal. May repurpose or discard.
+- Findings documented in `docs/findings.md` — four paths explored, browser
+  automation is the viable one.
 
-# Run pi with Sol
-pi --model openai-codex/gpt-5.6-sol
+## next
 
-# Verify no API usage at platform.openai.com/usage — should show $0
-```
-
-## non-goals
-
-- MCP server for ChatGPT web (tunnel approach) — deferred, not the core need
-- Browser automation (codex-chatgpt-web, agentify) — wrong layer
-- API usage of any kind — the whole point is the subscription
+1. Study codex-chatgpt-web and agentify-desktop extraction layers
+2. Build pi provider that spawns headless browser, manages ChatGPT session
+3. Expose `streamSimple` (pi's provider interface) over conversation UI
+4. Verify zero credit/API usage on platform.openai.com/usage
