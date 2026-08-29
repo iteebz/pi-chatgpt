@@ -1,10 +1,10 @@
 # pi-chatgpt
 
-ChatGPT Plus as a coding agent on your machine. Your subscription pays for the
+ChatGPT as a coding agent on your machine. Your subscription pays for the
 inference — no API key, no credits, no per-token bill.
 
 ```
-task ──▶ agent loop (local) ──▶ browser ──▶ ChatGPT Plus
+task ──▶ agent loop (local) ──▶ browser ──▶ ChatGPT
              ▲                                  │
              └──── tool results ◀── shell/file/grep/git
 ```
@@ -15,16 +15,22 @@ ChatGPT decides. Local code executes. The browser is just the wire.
 
 ```bash
 npm install
-
-# Chromium with remote debugging, logged into ChatGPT Plus
-open -a Arc --args --remote-debugging-port=9222
-curl -s http://127.0.0.1:9222/json/version   # verify
-
 node bin/cli.mjs agent "write fizzbuzz.py in /tmp, run it, confirm the output"
 ```
 
-The loop prints each tool call as it happens and exits with a JSON trace of
-every step, argument, and result.
+That's it. The browser launches automatically — Arc if running (inherits your
+login session), otherwise Chrome off-screen with a persistent profile.
+
+Environment variables for control:
+
+| var | default | purpose |
+|-----|---------|---------|
+| `PI_CHATGPT_THINKING` | `High` | Thinking slider: `Instant`, `Medium`, `High` |
+| `PI_CHATGPT_CDP` | `http://127.0.0.1:9222` | CDP endpoint to connect to |
+| `PI_CHATGPT_CDP_PORT` | `9222` | CDP port when auto-launching |
+| `PI_CHATGPT_PROFILE` | `~/.pi-chatgpt/chrome-profile` | Chrome profile for auto-launch |
+| `PI_CHATGPT_DEBUG` | unset | Log turn shape to stderr |
+| `PI_CHATGPT_TRACE` | unset | Write verbatim thread transcript to file |
 
 ## Tools
 
@@ -37,52 +43,63 @@ every step, argument, and result.
 | `git` | Git operations (status, diff, log, commit, etc.) |
 
 The protocol is a fenced JSON block per turn — `{"tool": ..., "args": ...}` in,
-tool result back, `{"done": "..."}` to finish. Angle-bracket tags do not
-survive markdown rendering; fences do.
+tool result back, `{"done": "..."}` to finish.
+
+## Browser strategy
+
+1. **Attach to running Arc** — `open -na Arc --args --remote-debugging-port=9222`.
+   Inherits your logged-in ChatGPT session, cookies, and model access (Sol, etc).
+2. **Attach to running Chrome** — same, for Google Chrome.
+3. **Launch Chrome off-screen** — persistent profile at `~/.pi-chatgpt/chrome-profile`,
+   window at `(-9999, -9999)`. No login = GPT-4o mini. Cloudflare blocks
+   `--headless`, so this is a real browser you never see.
+
+## What works and what doesn't
+
+**Standalone CLI — reliable.** The agent loop (`bin/cli.mjs agent`) follows the
+fenced-JSON protocol consistently. Tested across 40+ turns with zero protocol
+violations.
+
+**Pi provider — unreliable.** When registered as a pi extension, ChatGPT
+receives pi's full context (~7k chars of system prompt, tool definitions, and
+protocol specification) as a single turn. The model reads the user's request
+and answers it directly instead of emitting tool calls — it hallucinates
+outputs rather than following the protocol. The standalone CLI works because
+its prompt is tighter ("every reply is exactly one fenced json block and
+nothing else"). This is a prompt engineering problem, not an architecture
+problem, but it's unsolved.
 
 ## The invariant
 
 **Free ChatGPT only.** No OpenAI API key, no Codex quota, no metered path —
-ever. Traffic is your logged-in browser session on the normal chat endpoint,
-indistinguishable from you typing. `tests/invariant.test.mjs` fails the build if
-a credential, a paid endpoint, or a tunnel dependency enters the source.
-
-The one dependency is `playwright-core`, and it only attaches to a browser you
-already have open.
+ever. `tests/invariant.test.mjs` fails the build if a credential, a paid
+endpoint, or a tunnel dependency enters the source.
 
 ## Tests
 
 ```bash
-npm test                       # 30 unit tests, no browser needed
-node bin/cli.mjs agent "..."   # live probe against ChatGPT Plus
+npm test                       # 43 unit tests, no browser needed
+node bin/cli.mjs agent "..."   # live probe against ChatGPT
 ```
 
 ## Prior art
 
-Two projects sit adjacent. Neither does what this does.
-
 | | how ChatGPT gets tools | who drives | needs | core LOC |
 |---|---|---|---|---|
-| **pi-chatgpt** | fenced JSON in the chat | ChatGPT drives your machine | a logged-in browser | ~270 |
+| **pi-chatgpt** | fenced JSON in the chat | ChatGPT drives your machine | a Chromium browser | ~350 |
 | [codex-chatgpt-web](https://github.com/miuuyy/codex-chatgpt-web) | native MCP over OpenAI tunnel | ChatGPT drives Codex's harness | tunnel binary + runtime key + dev mode | ~36k |
 | [agentify-sh/desktop](https://github.com/agentify-sh/desktop) | n/a — ChatGPT is asked, not armed | your agent queries ChatGPT | Electron control center | ~1.9k |
 
-**codex-chatgpt-web** is the closest ancestor and the strongest project of the
-three: real compaction, retries, five browser tabs, cross-platform launcher. It
-reaches ChatGPT the official way — a tunnel and an MCP connector — and spends
-~3.6k lines on a browser worker to make the web UI behave like the Responses
-API. The cost is the setup: a pinned `tunnel-client` binary, a runtime API key,
-Developer Mode, a connector. We took the unofficial way and needed none of it.
+The bet: ChatGPT is smart enough that the tool ABI can be prose. That deletes
+the tunnel, the connector, the API key, the daemon, and the Responses
+translation layer. `Session.ask()` is the entire dependency on ChatGPT, so DOM
+drift can only break transport, never behavior.
 
-**agentify-desktop** points the other direction. Its MCP tools let *your* agent
-ask ChatGPT a question ("get a second opinion", "read this tab"). ChatGPT never
-touches your filesystem. Useful, but not an agent loop.
+## Status
 
-The bet here: ChatGPT is smart enough that the tool ABI can be prose. That
-deletes the tunnel, the connector, the API key, the daemon, and the Responses
-translation layer — everything between the model and the shell. `Session.ask()`
-is the entire dependency on ChatGPT, so DOM drift can only break transport,
-never behavior. The official route stays closed by policy: it needs a key.
+**Prototype — parked.** The standalone agent loop works. The pi provider path
+needs prompt work before it's reliable. ToS risk is real (automated access to
+ChatGPT web), so this lives as a proof of concept, not a production surface.
 
 ## License
 

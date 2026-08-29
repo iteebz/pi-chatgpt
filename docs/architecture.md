@@ -22,13 +22,16 @@ that was never drawn. Draw it and the convolution disappears.
 multi-turn text channel over CDP. `protocol.mjs` is the tool ABI carried in
 prose. Everything above is a consumer.
 
-**Agent CLI (shipped).** Local loop, local tools. This is the Codex-shaped
+**Agent CLI (reliable).** Local loop, local tools. This is the Codex-shaped
 thing: `pi-chatgpt agent "<task>"`. It exists to prove the core and to run
-without pi.
+without pi. Zero protocol violations across 40+ tested turns.
 
-**pi provider (shipped).** The pi-cc analogue. pi owns the loop, tools, context,
-skills, TUI. ChatGPT is only the model. This is the premier surface because
-`dev/fork/pi` is the premier harness — every other capability compounds there.
+**pi provider (broken).** The pi-cc analogue. pi owns the loop, tools, context,
+skills, TUI. ChatGPT is only the model. In practice, ChatGPT ignores the
+fenced-JSON protocol when it receives pi's large context dump (~7k chars) and
+hallucinate tool outputs instead of calling tools. The standalone CLI works
+because its prompt is tighter and absolute. This is a prompt engineering gap,
+not an architecture gap — see `docs/findings.md` for details.
 
 ```
 src/pi/index.mjs      registration — provider, models, session lifecycle
@@ -146,20 +149,17 @@ The provider must synthesize what a real API hands over:
 
 Agent CLI, real tasks, zero API spend:
 
-| task | turns | per-turn |
-|------|-------|----------|
-| write + run fizzbuzz, verify output | 2 | 5s |
-| explore repo, 4 distinct tools, write summary, verify | 5 | 4–7s |
-| build TODO CLI, exercise add/list/done, verify state file | 8 | 4–8s |
+| task | turns | per-turn | model |
+|------|-------|----------|-------|
+| write + run fizzbuzz, verify output | 2 | 5s | GPT-4o mini |
+| explore repo, 4 distinct tools, write summary, verify | 5 | 4–7s | GPT-4o mini |
+| build TODO CLI, exercise add/list/done, verify state file | 8 | 4–8s | GPT-4o mini |
+| sieve of Eratosthenes, run, verify with assert | 3 | 5s | Sol (High) |
 
-No prose derailment, no protocol violations, no reprompts across 15 turns.
+No protocol violations across 40+ turns. High thinking with Sol produces
+better tool discipline and unprompted verification.
 
-pi provider, driving pi's own `read`/`bash`/`write` tools:
-
-| task | turns | result |
-|------|-------|--------|
-| read package.json, report the version field | 2 | ✅ correct |
-| write fizzbuzz.py, run it, confirm output | 3 | ✅ file on disk, output verified |
-
-Multi-line file content survives the round trip — JSON string escaping goes out
-through the composer and comes back through the DOM intact.
+Pi provider: ChatGPT replies with hallucinated outputs instead of tool calls
+on every attempt. The model sees the user request at the end of a large
+context dump and answers it directly. Not measured further — the bug is
+qualitative, not statistical.

@@ -1,202 +1,149 @@
 # Findings
 
-What we learned exploring how to tap ChatGPT Plus unlimited Sol as a local
-coding agent backend.
+What we learned building a local coding agent backed by ChatGPT's browser
+session instead of an API.
 
 ## The goal
 
-Unlimited GPT-5.6 Sol driving a coding agent on the local machine. Plus
-subscription pays for inference — zero API spend, zero credits drawn.
+Unlimited GPT-5.6 Sol (or whatever model ChatGPT serves) driving a coding
+agent on the local machine. Plus subscription pays for inference — zero API
+spend, zero credits drawn.
 
-## Verified
+## What works
 
-### The pi provider works (Option C, shipped)
+### Standalone agent loop — reliable
 
-`pi -e src/pi/index.mjs --model chatgpt-web` — pi's loop, pi's tools, ChatGPT as
-the model. Two probes: read a file and report a field (2 turns), write
-fizzbuzz.py + run it + confirm the output (3 turns, file on disk).
+`node bin/cli.mjs agent "<task>"` — ChatGPT drives real tools on this machine.
 
-Three things had to be discovered by contact:
+| probe | turns | per-turn | result |
+|-------|-------|----------|--------|
+| write fizzbuzz.py, run, verify | 2 | 5s | ✅ |
+| explore repo, 4 tools, write summary | 5 | 4–7s | ✅ |
+| build TODO CLI, exercise add/list/done | 8 | 4–8s | ✅ |
+| sieve of Eratosthenes, run, verify with assert | 3 | 5s | ✅ |
 
-- **The DOM eats fences.** A json fence renders to `<pre><code>` and `innerText`
-  returns `JSON\n{...}` — markers gone, language demoted to a UI label. The CLI
-  never noticed because its parser accepts bare braces. The provider cannot:
-  prose and calls share a turn, so a JSON object quoted in prose must not
-  execute. `browser.mjs` now rebuilds fences from the code elements, which fixes
-  both consumers.
-- **ChatGPT refuses before it obeys.** Three distinct refusals in sequence: "I
-  can't access that path from this environment", "the tool isn't available in
-  this chat's tool interface", and a real attempt through its own code
-  interpreter reporting ENOENT. pi's system prompt assumes native tools and
-  never explains how they arrive. Fixed by framing the machine as real *before*
-  pi's prompt, forbidding its own tools by name, and asserting that writing the
-  block *is* the action — there is nothing to invoke.
-- **Usage must be faked upward, not to zero.** pi's auto-compaction reads token
-  counts. Zero is the honest number and the wrong one: nothing would ever
-  compact and the thread would hit its own invisible ceiling with pi believing
-  the context was empty. Estimated at 4 chars/token instead.
+Zero protocol violations across 40+ turns. The tight prompt ("every reply is
+exactly one fenced json block and nothing else") is the reason — it leaves no
+room for the model to "help" by skipping tool calls.
 
-### The agent loop works (Option B, shipped)
+### Browser auto-launch
 
-`node bin/cli.mjs agent "<task>"` — ChatGPT Plus drives real tools on this
-machine. Zero API spend, zero credentials, no daemon.
+Three-tier fallback, fully automatic:
+1. CDP already running → attach
+2. Arc running → `open -na Arc --args --remote-debugging-port=9222` (inherits login)
+3. Nothing → launch Chrome off-screen with persistent profile
 
-| probe | result |
-|-------|--------|
-| write fizzbuzz.py, run it, confirm output | ✅ 2 turns, correct output |
-| explore repo → read → grep → write summary → verify | ✅ 5 turns, 4 distinct tools |
+Arc attachment is the best path: inherits logged-in session, model access
+(Sol), and chat history. Chrome off-screen gets GPT-4o mini (no login).
 
-What made it work:
+### Thinking slider control
 
-- **Fenced JSON, not tags.** `<tool_call>` disappears — markdown rendering eats
-  bare angle brackets before `innerText` sees them. A ```json fence survives.
-- **Turn counting, not text diffing.** A reply identical to the previous one
-  still resolves because turn boundaries come from assistant node count.
-- **Tolerant parsing.** The model is the wire format. Accept `tool`/`name`,
-  `args`/`arguments`, fenced or bare, prose before the block.
-- **Reprompt on prose.** No fenced block → one corrective nudge, not a crash.
+ChatGPT's UI exposes a 3-position thinking slider: Instant / Medium / High.
+Controllable via `PI_CHATGPT_THINKING` env var. The slider is a Radix UI
+component — click the pill button to open, focus the slider control element,
+ArrowRight/ArrowLeft to navigate, Escape to dismiss. Direct click on model
+radio items fails (animation overlay intercepts pointer events).
 
-Open limits: temporary-chat context grows every turn with no compaction; tool
-results truncate at 6k chars; the browser must be up with the port open.
+High thinking produces noticeably better tool-call discipline and verification
+behavior (wrote a separate assert-based verification script unprompted).
 
-### Browser automation works
+### DOM fence reconstruction
 
-Playwright connects to Arc via CDP (`open -a Arc --args --remote-debugging-port=9222`),
-reuses the existing ChatGPT Plus session. DOM polling extracts responses reliably.
+ChatGPT renders ` ```json {...}``` ` as `<pre><code>` — fences disappear from
+`innerText`, language survives only as a CSS class. `browser.mjs` reconstructs
+fences from code elements. Without this, the parser that distinguishes tool
+calls from quoted JSON in prose would break.
 
-Tested with `proto/query.mjs`:
+## What doesn't work
 
-| test | result | time |
-|------|--------|------|
-| one-word answer | ✅ | 5.1s |
-| code generation (666 chars) | ✅ | 5.5s |
-| long essay (9,513 chars) | ✅ | 36.5s |
+### Pi provider — model ignores protocol
 
-### What doesn't work
+When registered as a pi extension (`pi --provider chatgpt-web`), ChatGPT
+receives pi's full context (~7k chars) as a single turn: system prompt, tool
+definitions, protocol specification, and user message. The model reads the
+user request at the end and **answers it directly** — it hallucinates tool
+outputs rather than emitting fenced JSON tool calls.
 
-- **Headless Playwright** → Cloudflare captcha. Must connect to real browser.
-- **Network interception** → SSE body truncated over CDP. The delta encoding
-  v1 parser works (append/patch on content parts) but `response.text()` returns
-  before the stream finishes.
-- **Clipboard extraction** → copy button blocked by overlay div.
-- **Direct `backend-api/conversation`** → proof tokens, requirements tokens,
-  CSRF tokens. Designed to reject non-browser clients. Cat-and-mouse.
+Attempted fixes that didn't help:
+- Adding "CRITICAL: You MUST use the fenced json tool-call format" to framing
+- Explicit instruction not to simulate or predict tool output
+- Setting thinking to High
 
-### MCP server exists
+The standalone CLI works because its prompt is shorter and absolute: "every
+reply is exactly one fenced json block and nothing else. no prose outside it."
+Pi's prompt allows prose alongside tool calls, and ChatGPT exploits that
+opening to skip the tools entirely.
 
-5 tools (shell, file_read, file_write, grep, git), 21 tests passing.
-Originally built for the tunnel path. Reusable by any architecture.
+This is a prompt engineering problem. Possible fixes not yet tried:
+- Split preamble into turn 1, wait for ack, send task as turn 2
+- Inject a fake first tool-call exchange to demonstrate the protocol
+- Shorten pi's system prompt for the chatgpt-web provider
 
-## Architecture options
+### Headless Chrome
 
-Three ways to connect ChatGPT (brain) to local tools (hands):
+Cloudflare detects `HeadlessChrome` in the User-Agent and serves a captcha
+wall. `--headless=new` doesn't help. Must be a real browser process.
 
-### Option A: OpenAI tunnel (native MCP)
+### Network interception
 
-```
-ChatGPT web ──native MCP──▶ tunnel-client daemon ──▶ pi-chatgpt MCP server
-                                                       ├── shell
-                                                       ├── file_read/write
-                                                       └── grep, git
-```
+SSE body truncated over CDP. The delta encoding v1 parser works but
+`response.text()` returns before the stream finishes. DOM polling is the
+reliable path.
 
-ChatGPT owns the agent loop. Calls tools natively via MCP protocol.
+## Model access without login
 
-- **Pro:** clean protocol, ChatGPT handles tool calling natively, MCP server
-  already built
-- **Con:** requires tunnel ID + runtime API key + daemon process, OpenAI infra
-  dependency, another credential to manage
-- **Status:** tunnel ID stored in vault. Need runtime API key from
-  platform.openai.com/settings/organization/api-keys
+ChatGPT serves GPT-4o mini to anonymous users. The composer loads, the agent
+loop runs, tools execute. Weaker model but functional for simple tasks.
 
-### Option B: Browser agent loop (prompt-engineered tools)
+With a Plus login (via Arc session inheritance), you get access to Sol and the
+thinking slider. The Plus account is the real asset here — and the real risk,
+since automated access violates ToS.
 
-```
-agent loop (local)
-  ├── send system prompt + tool defs + task to ChatGPT via browser
-  ├── ChatGPT responds with tool call or final answer
-  ├── parse tool call → execute locally → paste result back
-  └── repeat until done
-```
+## Risk assessment
 
-Local code owns the agent loop. ChatGPT is the LLM brain. Browser is the
-transport layer.
+- **Detection:** Easy. Automated typing patterns, CDP attachment, temp chats,
+  no mouse movement, instant paste of multi-KB prompts.
+- **Enforcement:** Account ban. Plus subscription and chat history lost.
+- **Likelihood:** Low today. codex-chatgpt-web exists and seems unflagged.
+  Increases if these tools get popular.
+- **Mitigation:** Throwaway account for testing. Don't run against a primary
+  account with history you care about.
 
-- **Pro:** zero additional setup, no credentials, no daemon, already proved
-  browser query works, both pieces exist (proto/query.mjs + src/tools/)
-- **Con:** prompt-engineered tool protocol (fragile?), multi-turn conversation
-  management in DOM, need to design tool call format
-- **Ref:** CatGPT does exactly this — instructs ChatGPT to output structured
-  JSON tool calls, parses and executes them
+## Prior art comparison
 
-Tool call format (strawman):
-```
-<tool_call>{"name":"shell","args":{"command":"ls -la"}}</tool_call>
-```
+| | pi-chatgpt | codex-chatgpt-web | agentify-desktop |
+|---|---|---|---|
+| tool delivery | fenced JSON in prose | native MCP over tunnel | n/a (query only) |
+| concurrency | 1 tab, serial | 5 tabs, parallel | parallel tabs |
+| session | temp chat, serial reuse | temp chat per task | stable tab keys |
+| setup | zero | tunnel + API key + dev mode | Electron install |
+| LOC | ~350 | ~36k | ~1.9k |
 
-### Option C: Pi provider (browser as LLM backend)
+codex-chatgpt-web solves a harder problem (Codex compatibility) and is the
+stronger project. pi-chatgpt is simpler because the standalone CLI owns the
+entire loop, and the pi provider path (which would need codex-level complexity
+to be reliable) doesn't work yet.
+
+## Architecture
 
 ```
-pi (agent harness)
-  └── pi-chatgpt provider
-        └── browser → ChatGPT → DOM polling → response text
+      ┌─ pi provider (broken) ────────┐   ┌─ agent CLI (works) ──────┐
+      │  pi owns loop, tools, context │   │  own loop, own tools     │
+      └───────────────┬───────────────┘   └────────────┬─────────────┘
+                      │                                │
+                      └─────────── core ───────────────┘
+                           browser.mjs  ask(text) → reply
+                           protocol.mjs text ⇄ tool calls
 ```
 
-Pi owns the agent loop and tool execution. ChatGPT is just an LLM endpoint.
-The pi-cc pattern applied to a browser subprocess.
-
-- **Pro:** pi's existing tool system, context management, skills, and session
-  handling. Just swap the LLM backend.
-- **Con:** most complex. Browser automation + pi provider interface. Pi
-  handles tools, so ChatGPT doesn't need to know about them — but then
-  we're paying the pi tax on every call.
-- **Ref:** pi-cc wraps Claude Code this way. ~300 lines of provider glue.
-
-### Outcome
-
-**Option B shipped and works.** ~250 lines: `src/browser.mjs` (transport),
-`src/protocol.mjs` (tool ABI over prose), `src/agent.mjs` (loop). ChatGPT is
-smart enough to follow a prompt-engineered tool protocol — that was the open
-question, and it is answered.
-
-Option A is closed by invariant: the tunnel needs a runtime API key, and this
-project ships no credentials. Its MCP server is deleted.
-
-**Option C shipped too**, and the "pi tax" worry did not materialize — the
-provider is ~150 lines of glue on top of the same `Session.ask()`, because the
-transport was already isolated behind it. Both consumers run on one core.
+The core is proven and clean. `Session.ask()` is the entire dependency on
+ChatGPT. The standalone CLI consumer is reliable. The pi provider consumer
+needs prompt work.
 
 ## Reference repos
 
-| repo | path | useful for |
-|------|------|------------|
-| pi-cc | `~/dev/fork/pi-cc` | pi extension architecture, provider registration |
-| pi | `~/dev/fork/pi` | agent harness, provider interface, OAuth |
-| codex-chatgpt-web | `~/dev/fork/codex-chatgpt-web` | ChatGPT DOM interaction, turn broker, MCP bridge |
-| agentify-desktop | `~/dev/fork/agentify-desktop` | multi-vendor browser automation, chatgpt-controller |
-| codex | `~/dev/fork/codex` | Codex CLI source, auth model |
-
-## Auth landscape
-
-```
-OPENAI_API_KEY          → OpenAI API       → billed per token ($$$)
-openai-codex OAuth      → backend-api/codex → billed in credits (limited)
-ChatGPT session (Arc)   → backend-api/conversation → unlimited (Plus sub)
-```
-
-## SSE format notes (for future network interception)
-
-ChatGPT uses delta encoding v1. Not raw message objects — JSON patch-like ops:
-
-```
-event: delta
-data: {"p":"/message/content/parts/0","o":"append","v":"hello"}
-
-event: delta
-data: {"o":"patch","v":[
-  {"p":"/message/content/parts/0","o":"append","v":" world"},
-  {"p":"/message/status","o":"replace","v":"finished_successfully"}
-]}
-```
-
-Parser exists in `proto/network-intercept.mjs` but body buffering is broken.
+| repo | useful for |
+|------|------------|
+| pi-cc (`~/dev/fork/pi-cc`) | pi extension architecture, provider registration |
+| codex-chatgpt-web | ChatGPT DOM interaction, tab pooling, MCP bridge |
+| agentify-desktop | multi-vendor browser automation |
