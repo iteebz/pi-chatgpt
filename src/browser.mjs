@@ -19,6 +19,8 @@ const CDP_PORT = Number(process.env.PI_CHATGPT_CDP_PORT) || 9222;
 const CDP_URL = process.env.PI_CHATGPT_CDP || `http://127.0.0.1:${CDP_PORT}`;
 const CHAT_URL = "https://chatgpt.com/?temporary-chat=true";
 const PROFILE_DIR = process.env.PI_CHATGPT_PROFILE || join(homedir(), ".pi-chatgpt", "chrome-profile");
+/** @type {"Instant"|"Medium"|"High"} */
+export const DEFAULT_THINKING = process.env.PI_CHATGPT_THINKING || "High";
 
 const SEL = {
   composer:
@@ -29,14 +31,20 @@ const SEL = {
     '[data-testid^="conversation-turn-"][data-turn="assistant"]',
     '[data-testid^="conversation-turn-"][data-message-author-role="assistant"]',
   ].join(", "),
+  thinkingPill: 'button.__composer-pill',
+  sliderControl: '.d1BZWq_SliderControl',
 };
+
+const THINKING_LEVELS = ["Instant", "Medium", "High"];
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export class Session {
-  constructor({ timeoutMs = 300_000, verbose = false } = {}) {
+  constructor({ timeoutMs = 300_000, verbose = false, thinking = null } = {}) {
     this.timeoutMs = timeoutMs;
     this.verbose = verbose;
+    /** @type {"Instant"|"Medium"|"High"|null} */
+    this.thinking = thinking;
   }
 
   async open() {
@@ -49,11 +57,46 @@ export class Session {
     await this.page.goto(CHAT_URL, { waitUntil: "domcontentloaded" });
     await this.page.waitForSelector(SEL.composer, { timeout: 30_000 });
     await sleep(500);
+    if (this.thinking) await this.#setThinking(this.thinking);
     return this;
   }
 
   async close() {
     await this.browser?.close();
+  }
+
+  async #setThinking(level) {
+    const target = THINKING_LEVELS.indexOf(level);
+    if (target < 0) return;
+
+    const pill = this.page.locator(SEL.thinkingPill).first();
+    if (!(await pill.isVisible().catch(() => false))) return;
+
+    const current = await pill.innerText().catch(() => "");
+    const currentIdx = THINKING_LEVELS.indexOf(current.trim());
+    if (currentIdx === target) return;
+
+    await pill.click();
+    await sleep(500);
+
+    const slider = this.page.locator(SEL.sliderControl);
+    if (!(await slider.isVisible().catch(() => false))) {
+      await this.page.keyboard.press("Escape");
+      return;
+    }
+    await slider.focus();
+    await sleep(200);
+
+    // Reset to Instant (all the way left), then right to target
+    for (let i = 0; i < 3; i++) await this.page.keyboard.press("ArrowLeft");
+    await sleep(100);
+    for (let i = 0; i < target; i++) {
+      await this.page.keyboard.press("ArrowRight");
+      await sleep(100);
+    }
+
+    await this.page.keyboard.press("Escape");
+    await sleep(300);
   }
 
   async ask(text) {

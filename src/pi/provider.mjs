@@ -20,7 +20,7 @@
 
 import { appendFileSync } from "node:fs";
 import * as piAi from "@earendil-works/pi-ai";
-import { Session } from "../browser.mjs";
+import { Session, DEFAULT_THINKING } from "../browser.mjs";
 import { parseReply } from "../protocol.mjs";
 import { plan } from "./serialize.mjs";
 
@@ -76,7 +76,7 @@ async function turn(model, context, options, stream) {
       session = null;
       sentChars = 0;
     }
-    if (!session) session = await new Session().open();
+    if (!session) session = await new Session({ thinking: DEFAULT_THINKING }).open();
 
     debug(`${step.mode}: sending ${step.text.length} chars`);
     if (aborted(options)) return abort(stream, message);

@@ -5,7 +5,7 @@
  * as the tool ABI, src/tools as the hands. No API key, no tunnel, no daemon.
  */
 
-import { Session } from "./browser.mjs";
+import { Session, DEFAULT_THINKING } from "./browser.mjs";
 import { tools } from "./tools/index.mjs";
 import { parse } from "./protocol.mjs";
 
@@ -56,7 +56,7 @@ export function renderResult(result, maxChars = 6000) {
 }
 
 export async function run(task, { cwd = process.cwd(), maxSteps = 20, log = () => {} } = {}) {
-  const session = await new Session().open();
+  const session = await new Session({ thinking: DEFAULT_THINKING }).open();
   const trace = [];
 
   try {
