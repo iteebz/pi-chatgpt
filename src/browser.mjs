@@ -199,6 +199,9 @@ async function ensureCDP() {
     `--user-data-dir=${PROFILE_DIR}`,
     "--no-first-run",
     "--no-default-browser-check",
+    // Real Chrome (not headless — Cloudflare blocks that) but invisible.
+    "--window-position=-9999,-9999",
+    "--window-size=1280,800",
     CHAT_URL,
   ];
 
