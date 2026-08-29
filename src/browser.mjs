@@ -179,11 +179,37 @@ function findChrome() {
   return null;
 }
 
+/** Try to attach CDP to a running browser that wasn't launched with the flag.
+ *  macOS `open -na` with --args passes Chromium flags to a running app. */
+async function tryAttachRunning() {
+  for (const app of ["Arc", "Google Chrome"]) {
+    if (!existsSync(`/Applications/${app}.app`)) continue;
+    try {
+      execSync(
+        `open -na "${app}" --args --remote-debugging-port=${CDP_PORT}`,
+        { timeout: 5000, stdio: "ignore" },
+      );
+      // Wait for CDP
+      const deadline = Date.now() + 5000;
+      while (Date.now() < deadline) {
+        if (await cdpAlive()) {
+          process.stderr.write(`[pi-chatgpt] attached CDP to running ${app}\n`);
+          return true;
+        }
+        await sleep(300);
+      }
+    } catch {}
+  }
+  return false;
+}
+
 let launched = false;
 
-/** Ensure a CDP-enabled browser is running. Launches one if needed. */
+/** Ensure a CDP-enabled browser is running. Prefers an existing browser
+ *  (inherits login sessions), falls back to launching Chrome off-screen. */
 async function ensureCDP() {
   if (await cdpAlive()) return;
+  if (await tryAttachRunning()) return;
   if (launched) throw new Error("Launched Chrome but CDP never came up");
 
   const bin = findChrome();
