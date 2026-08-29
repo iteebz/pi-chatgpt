@@ -26,9 +26,15 @@ prose. Everything above is a consumer.
 thing: `pi-chatgpt agent "<task>"`. It exists to prove the core and to run
 without pi.
 
-**pi provider (target).** The pi-cc analogue. pi owns the loop, tools, context,
+**pi provider (shipped).** The pi-cc analogue. pi owns the loop, tools, context,
 skills, TUI. ChatGPT is only the model. This is the premier surface because
 `dev/fork/pi` is the premier harness — every other capability compounds there.
+
+```
+src/pi/index.mjs      registration — provider, models, session lifecycle
+src/pi/provider.mjs   the turn — one call in, one reply out, pi's events
+src/pi/serialize.mjs  the diff — pi's Context → what the thread has not seen
+```
 
 ## Why the provider is not just the loop again
 
@@ -38,6 +44,11 @@ skills, TUI. ChatGPT is only the model. This is the premier surface because
 | who owns tools | this repo | pi |
 | who owns context | the chat thread | pi |
 | protocol | ours end to end | pi's tool defs → prose → pi tool_use blocks |
+
+Run it: `pi -e ~/dev/fork/pi-chatgpt/src/pi/index.mjs --model chatgpt-web`.
+`PI_CHATGPT_DEBUG=1` logs turn shape; `PI_CHATGPT_TRACE=<file>` writes the
+verbatim thread transcript, which is the only place prompt bugs are visible —
+pi's TUI shows the parsed result, not what the model actually saw.
 
 Provider contract: `StreamFunction<string, SimpleStreamOptions>` —
 `(model, context, options) → AssistantMessageEventStream`, emitting pi's event
@@ -49,20 +60,30 @@ start → text_start/text_delta/text_end
       → done{reason: "stop" | "toolUse" | "length"}
 ```
 
-Three jobs:
+The thread *is* the session, so the provider is a diff, not a serializer: turn
+one carries pi's system prompt and tool schemas, every later turn carries only
+the messages the thread has not seen. Assistant messages in the tail are the
+thread's own replies coming back — sending them would make the model read its
+own words as user input.
 
-1. **Serialize** pi's system prompt + tool schemas into the first turn of a
-   chat thread; serialize each later turn as only the new message. The thread
-   *is* the session — do not resend history, the browser already holds it.
-2. **Parse** the reply into assistant events: text, then `tool_use` blocks from
-   fenced JSON (`protocol.mjs` already does this half).
-3. **Map** a chat thread to a pi session, like pi-cc maps a CC session UUID.
-   New thread on session start, reuse across turns, rebuild on drift.
+That makes drift the central risk. pi rewrites its message array on compaction
+and session-tree navigation; a thread that silently kept the old history would
+answer from a past that no longer exists. So every message we have represented
+is fingerprinted, and when the live array stops extending that prefix — or the
+system prompt or tool surface changes — the thread is wrong and gets rebuilt
+from scratch in a new chat.
 
-When it lands, `src/tools/` dies — pi owns the hands, we own only the mouth.
-Two events must be faked: `toolcall_delta` (DOM yields whole replies, never
-partial calls) and `done.reason` (inferred from reply shape; ChatGPT never
-reports why it stopped, and `length` has no signal at all).
+Three events have no honest source and are synthesized:
+
+- `toolcall_delta` — DOM polling yields whole replies, so it fires once with the
+  complete arguments rather than not at all.
+- `done.reason` — inferred from shape: calls present is `toolUse`, absent is
+  `stop`. ChatGPT never reports why it stopped and `length` has no signal, so
+  it is never emitted.
+- `usage` — estimated at 4 chars per token over everything the thread has
+  carried. Zero would be more honest and is worse: pi's auto-compaction would
+  never fire and the thread would hit its own invisible ceiling with pi
+  believing the context was empty.
 
 ## Why not MCP
 
@@ -100,10 +121,22 @@ The provider must synthesize what a real API hands over:
 
 - **No system prompt slot.** It becomes turn one of the thread.
 - **No native tool calling.** Fenced JSON is the ABI. Angle-bracket tags do not
-  survive markdown rendering.
-- **No token accounting.** Usage numbers are fabricated or zero; pi's
-  auto-compaction cannot rely on them. Context ceiling is the thread's, unknown
-  and smaller than the API's.
+  survive markdown rendering — and neither do the fences themselves: a fenced
+  block renders to `<pre><code>`, where `innerText` returns `JSON\n{...}` with
+  the markers gone and the language demoted to a UI label. `browser.mjs`
+  reconstructs the fences from the code elements. The CLI never noticed because
+  its parser accepts bare braces; the provider cannot, because prose and calls
+  share a turn there.
+- **No obedience by default.** pi's system prompt assumes native tools and says
+  nothing about how they arrive, so ChatGPT answers from its own prior — "I
+  can't access that path," then "the tool isn't available in this chat," then a
+  failed attempt through its own code interpreter. Three refusals, three prompt
+  fixes: frame the machine as real before pi's prompt, forbid its own tools
+  explicitly, and state that writing the block *is* the action rather than
+  asking it to invoke anything.
+- **No token accounting.** Usage is estimated from characters. Context ceiling
+  is the thread's, unknown and smaller than the API's.
+- **No parallelism.** One browser tab, one reply at a time; every call queues.
 - **No prompt caching, and no need for one.** Free inference removes the
   incentive the cache invariant protects.
 - **Latency is the cost.** 4–8s per turn measured, vs sub-second API TTFT.
@@ -120,3 +153,13 @@ Agent CLI, real tasks, zero API spend:
 | build TODO CLI, exercise add/list/done, verify state file | 8 | 4–8s |
 
 No prose derailment, no protocol violations, no reprompts across 15 turns.
+
+pi provider, driving pi's own `read`/`bash`/`write` tools:
+
+| task | turns | result |
+|------|-------|--------|
+| read package.json, report the version field | 2 | ✅ correct |
+| write fizzbuzz.py, run it, confirm output | 3 | ✅ file on disk, output verified |
+
+Multi-line file content survives the round trip — JSON string escaping goes out
+through the composer and comes back through the DOM intact.

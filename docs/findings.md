@@ -10,6 +10,32 @@ subscription pays for inference — zero API spend, zero credits drawn.
 
 ## Verified
 
+### The pi provider works (Option C, shipped)
+
+`pi -e src/pi/index.mjs --model chatgpt-web` — pi's loop, pi's tools, ChatGPT as
+the model. Two probes: read a file and report a field (2 turns), write
+fizzbuzz.py + run it + confirm the output (3 turns, file on disk).
+
+Three things had to be discovered by contact:
+
+- **The DOM eats fences.** A json fence renders to `<pre><code>` and `innerText`
+  returns `JSON\n{...}` — markers gone, language demoted to a UI label. The CLI
+  never noticed because its parser accepts bare braces. The provider cannot:
+  prose and calls share a turn, so a JSON object quoted in prose must not
+  execute. `browser.mjs` now rebuilds fences from the code elements, which fixes
+  both consumers.
+- **ChatGPT refuses before it obeys.** Three distinct refusals in sequence: "I
+  can't access that path from this environment", "the tool isn't available in
+  this chat's tool interface", and a real attempt through its own code
+  interpreter reporting ENOENT. pi's system prompt assumes native tools and
+  never explains how they arrive. Fixed by framing the machine as real *before*
+  pi's prompt, forbidding its own tools by name, and asserting that writing the
+  block *is* the action — there is nothing to invoke.
+- **Usage must be faked upward, not to zero.** pi's auto-compaction reads token
+  counts. Zero is the honest number and the wrong one: nothing would ever
+  compact and the thread would hit its own invisible ceiling with pi believing
+  the context was empty. Estimated at 4 chars/token instead.
+
 ### The agent loop works (Option B, shipped)
 
 `node bin/cli.mjs agent "<task>"` — ChatGPT Plus drives real tools on this
@@ -134,8 +160,11 @@ smart enough to follow a prompt-engineered tool protocol — that was the open
 question, and it is answered.
 
 Option A is closed by invariant: the tunnel needs a runtime API key, and this
-project ships no credentials. Its MCP server is deleted. Option C (pi provider) is now a natural upgrade:
-the transport is proven and isolated behind `Session.ask()`.
+project ships no credentials. Its MCP server is deleted.
+
+**Option C shipped too**, and the "pi tax" worry did not materialize — the
+provider is ~150 lines of glue on top of the same `Session.ask()`, because the
+transport was already isolated behind it. Both consumers run on one core.
 
 ## Reference repos
 
