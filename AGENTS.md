@@ -21,15 +21,18 @@ Plus subscription. Zero API spend.
   ChatGPT Plus session, sends prompts, polls DOM for responses.
 - MCP server: 5 tools (shell, file_read, file_write, grep, git). 30 tests.
 
-## architecture options
+## architecture
 
-See `docs/findings.md` for full analysis. Three paths:
+`docs/architecture.md` is the layer map: core (browser + protocol) under two
+consumers (agent CLI, pi provider). **The pi provider is the premier surface** —
+`~/dev/fork/pi` is the harness everything compounds in, and pi-cc is the
+template. `docs/findings.md` is the exploration log. Three paths were weighed:
 
 | option | who owns the loop | transport | status |
 |--------|-------------------|-----------|--------|
 | A. OpenAI tunnel | ChatGPT | native MCP via tunnel-client | needs runtime API key |
 | B. Browser agent loop | local code | browser DOM | **shipped, works** |
-| C. Pi provider | pi harness | browser as LLM backend | natural next upgrade |
+| C. Pi provider | pi harness | browser as LLM backend | **the target** |
 
 ## repo map
 
@@ -40,7 +43,8 @@ src/protocol.mjs  tool ABI: fenced json in, fenced json out
 src/tools/        tool implementations (shared with the MCP server)
 src/server.mjs    MCP server (stdio transport, Option A path)
 proto/            browser prototypes (query.mjs proved the transport)
-docs/findings.md  what was tried, what worked, why
+docs/architecture.md  layer map — core vs consumers, provider contract
+docs/findings.md      what was tried, what worked, why
 ```
 
 protocol invariant: fenced ```json, never angle-bracket tags — markdown
