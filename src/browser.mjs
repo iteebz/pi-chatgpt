@@ -9,10 +9,16 @@
  * See docs/findings.md for why DOM polling and not network interception.
  */
 
+import { execSync, spawn } from "node:child_process";
+import { existsSync, mkdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { chromium } from "playwright-core";
 
-const CDP_URL = process.env.PI_CHATGPT_CDP || "http://127.0.0.1:9222";
+const CDP_PORT = Number(process.env.PI_CHATGPT_CDP_PORT) || 9222;
+const CDP_URL = process.env.PI_CHATGPT_CDP || `http://127.0.0.1:${CDP_PORT}`;
 const CHAT_URL = "https://chatgpt.com/?temporary-chat=true";
+const PROFILE_DIR = process.env.PI_CHATGPT_PROFILE || join(homedir(), ".pi-chatgpt", "chrome-profile");
 
 const SEL = {
   composer:
@@ -34,9 +40,10 @@ export class Session {
   }
 
   async open() {
+    await ensureCDP();
     this.browser = await chromium.connectOverCDP(CDP_URL);
     const ctx = this.browser.contexts()[0];
-    if (!ctx) throw new Error("No browser context — is the browser running with --remote-debugging-port?");
+    if (!ctx) throw new Error("No browser context found");
 
     this.page = ctx.pages().find((p) => p.url().includes("chatgpt")) || (await ctx.newPage());
     await this.page.goto(CHAT_URL, { waitUntil: "domcontentloaded" });
@@ -140,4 +147,71 @@ export class Session {
       return read(root).trim();
     }, SEL.assistant);
   }
+}
+
+/** True if CDP is listening. */
+async function cdpAlive() {
+  try {
+    const r = await fetch(`${CDP_URL}/json/version`, { signal: AbortSignal.timeout(2000) });
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Find a Chromium-family binary on macOS or Linux. */
+function findChrome() {
+  const candidates = [
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+  ];
+  for (const c of candidates) {
+    if (existsSync(c)) return c;
+  }
+  // Linux / PATH fallback
+  for (const name of ["google-chrome", "chromium", "chromium-browser"]) {
+    try {
+      const p = execSync(`which ${name}`, { encoding: "utf8" }).trim();
+      if (p) return p;
+    } catch {}
+  }
+  return null;
+}
+
+let launched = false;
+
+/** Ensure a CDP-enabled browser is running. Launches one if needed. */
+async function ensureCDP() {
+  if (await cdpAlive()) return;
+  if (launched) throw new Error("Launched Chrome but CDP never came up");
+
+  const bin = findChrome();
+  if (!bin) {
+    throw new Error(
+      "No Chrome/Chromium found. Install Google Chrome or set PI_CHATGPT_CDP to a running debugger URL.",
+    );
+  }
+
+  mkdirSync(PROFILE_DIR, { recursive: true });
+  const args = [
+    `--remote-debugging-port=${CDP_PORT}`,
+    `--user-data-dir=${PROFILE_DIR}`,
+    "--no-first-run",
+    "--no-default-browser-check",
+    CHAT_URL,
+  ];
+
+  process.stderr.write(`[pi-chatgpt] launching Chrome with CDP on :${CDP_PORT}\n`);
+  const child = spawn(bin, args, { detached: true, stdio: "ignore" });
+  child.unref();
+  launched = true;
+
+  // Wait for CDP to come up
+  const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline) {
+    if (await cdpAlive()) return;
+    await sleep(500);
+  }
+  throw new Error(`Chrome launched but CDP not responding on ${CDP_URL} after 15s`);
 }
