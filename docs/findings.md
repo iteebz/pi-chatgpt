@@ -133,8 +133,8 @@ The pi-cc pattern applied to a browser subprocess.
 smart enough to follow a prompt-engineered tool protocol — that was the open
 question, and it is answered.
 
-Option A stays viable if OpenAI maintains the tunnel infra, but it is more
-setup for the same result. Option C (pi provider) is now a natural upgrade:
+Option A is closed by invariant: the tunnel needs a runtime API key, and this
+project ships no credentials. Its MCP server is deleted. Option C (pi provider) is now a natural upgrade:
 the transport is proven and isolated behind `Session.ask()`.
 
 ## Reference repos

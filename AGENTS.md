@@ -1,5 +1,19 @@
 # pi-chatgpt
 
+## invariant
+
+**Free ChatGPT only.** No OpenAI API key. No Codex quota. No metered path, ever.
+This is the reason the project exists — violate it and there is nothing left
+worth shipping.
+
+Enforced, not trusted: `tests/invariant.test.mjs` scans `src/`, `bin/`, and
+`package.json` for credentials, paid endpoints, Codex backends, and tunnel
+dependencies. It fails the build. Verified to fail by planting a violation.
+
+Consequences already taken: the OpenAI tunnel path (Option A) is closed — it
+requires a runtime API key. Its MCP server and stdio transport are deleted, not
+archived.
+
 ## problem
 
 ChatGPT Plus gives unlimited GPT-5.6 Sol via the conversation interface.
@@ -19,7 +33,9 @@ Plus subscription. Zero API spend.
   ran a script; explored the repo across 4 tools and wrote a verified summary.
 - Browser automation via CDP: Playwright connects to Arc, reuses the logged-in
   ChatGPT Plus session, sends prompts, polls DOM for responses.
-- MCP server: 5 tools (shell, file_read, file_write, grep, git). 30 tests.
+- Zero credentials in the agent path: no API key, no token, no Authorization
+  header, no OpenAI endpoint. Codex quota is untouched because Codex is never
+  involved. Traffic is the normal chat endpoint on your logged-in session.
 
 ## architecture
 
@@ -30,7 +46,7 @@ template. `docs/findings.md` is the exploration log. Three paths were weighed:
 
 | option | who owns the loop | transport | status |
 |--------|-------------------|-----------|--------|
-| A. OpenAI tunnel | ChatGPT | native MCP via tunnel-client | needs runtime API key |
+| A. OpenAI tunnel | ChatGPT | native MCP via tunnel-client | **closed — needs an API key** |
 | B. Browser agent loop | local code | browser DOM | **shipped, works** |
 | C. Pi provider | pi harness | browser as LLM backend | **the target** |
 
@@ -41,7 +57,6 @@ src/agent.mjs     the loop — local control, ChatGPT judgment
 src/browser.mjs   CDP session, multi-turn ask()
 src/protocol.mjs  tool ABI: fenced json in, fenced json out
 src/tools/        tool implementations (shared with the MCP server)
-src/server.mjs    MCP server (stdio transport, Option A path)
 proto/            browser prototypes (query.mjs proved the transport)
 docs/architecture.md  layer map — core vs consumers, provider contract
 docs/findings.md      what was tried, what worked, why
@@ -53,7 +68,7 @@ rendering strips bare tags before `innerText` sees them.
 ## conventions
 
 - node, ESM, no typescript (prototype pace)
-- playwright-core for browser (not bundled chromium — connects via CDP)
+- playwright-core is the only dependency — a new one must carry no metered path
 - test with `npm test` (unit) and `node bin/cli.mjs agent "<task>"` (live)
 
 ## browser prereqs
