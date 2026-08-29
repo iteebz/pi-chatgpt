@@ -1,67 +1,58 @@
 /**
- * Tool-call protocol carried over prose.
+ * Tool-call protocol carried over prose — the wire format, shared by both
+ * consumers (agent CLI, pi provider).
  *
  * ChatGPT web has no native function calling, so the contract is a fenced JSON
  * block. Fences survive markdown rendering; bare angle-bracket tags do not
  * (innerText drops them as HTML). Parsing is tolerant by design: the model is
  * the wire format, so accept any fenced JSON that looks like a call.
+ *
+ * Two readers, two tolerances. `parse` serves the CLI: one action per reply,
+ * bare braces accepted because the reply is nothing but the call. `parseReply`
+ * serves the pi provider: prose and calls coexist in one turn, so only fenced
+ * blocks count — a JSON object quoted in prose is prose.
  */
-
-import { tools } from "./tools/index.mjs";
-
-export function systemPrompt(task, cwd) {
-  const specs = [...tools.values()].map((t) => {
-    const args = Object.entries(t.schema)
-      .map(([k, v]) => `${k}: ${v.type}${v.optional ? "?" : ""} — ${v.description}`)
-      .join("\n    ");
-    return `- ${t.name}: ${t.description}\n    ${args}`;
-  });
-
-  return `You are a coding agent acting on a real machine. You cannot touch it directly — I execute your tool calls and paste the results back.
-
-Working directory: ${cwd}
-
-TOOLS
-${specs.join("\n")}
-
-PROTOCOL
-Every reply is exactly one fenced json block and nothing else. No prose outside it.
-
-To act:
-\`\`\`json
-{"tool": "shell", "args": {"command": "ls -la"}}
-\`\`\`
-
-When the task is complete:
-\`\`\`json
-{"done": "one-line summary of what you did and what you found"}
-\`\`\`
-
-RULES
-- One tool call per reply. Wait for the result before the next.
-- Verify by contact: after writing files, run them or test them.
-- Do not narrate, apologize, or ask permission. Act.
-- If a tool errors, adapt and continue; if truly blocked, emit done with the reason.
-
-TASK
-${task}`;
-}
 
 export function parse(reply) {
   for (const raw of candidates(reply)) {
-    let obj;
-    try {
-      obj = JSON.parse(raw);
-    } catch {
-      continue;
-    }
-    if (obj && typeof obj === "object") {
-      if (typeof obj.done === "string") return { kind: "done", summary: obj.done };
-      const name = obj.tool || obj.name;
-      if (typeof name === "string") return { kind: "call", name, args: obj.args || obj.arguments || {} };
-    }
+    const obj = tryJson(raw);
+    if (!obj) continue;
+    if (typeof obj.done === "string") return { kind: "done", summary: obj.done };
+    const call = asCall(obj);
+    if (call) return { kind: "call", ...call };
   }
   return { kind: "prose", text: reply };
+}
+
+/** Split an assistant reply into user-visible text and the tool calls it carries. */
+export function parseReply(reply) {
+  const calls = [];
+  const text = reply
+    .replace(/```[a-zA-Z]*\n([\s\S]*?)```/g, (block, body) => {
+      const call = asCall(tryJson(body.trim()));
+      if (!call) return block;
+      calls.push(call);
+      return "";
+    })
+    .trim();
+  return { text, calls };
+}
+
+function tryJson(raw) {
+  try {
+    const obj = JSON.parse(raw);
+    return obj && typeof obj === "object" && !Array.isArray(obj) ? obj : null;
+  } catch {
+    return null;
+  }
+}
+
+function asCall(obj) {
+  if (!obj) return null;
+  const name = obj.tool || obj.name;
+  if (typeof name !== "string") return null;
+  const args = obj.args || obj.arguments || {};
+  return { name, args: typeof args === "object" && args !== null ? args : {} };
 }
 
 /** Fenced blocks first, then any balanced top-level JSON object in the text. */
@@ -82,10 +73,4 @@ function* candidates(reply) {
       if (depth < 0) depth = 0;
     }
   }
-}
-
-export function renderResult(result, maxChars = 6000) {
-  let text = typeof result === "string" ? result : JSON.stringify(result, null, 2);
-  if (text.length > maxChars) text = `${text.slice(0, maxChars)}\n…[truncated ${text.length - maxChars} chars]`;
-  return `TOOL RESULT\n\`\`\`json\n${text}\n\`\`\`\nNext tool call, or done.`;
 }

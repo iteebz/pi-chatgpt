@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parse, renderResult, systemPrompt } from "../src/protocol.mjs";
+import { parse, parseReply } from "../src/protocol.mjs";
+import { renderResult, systemPrompt } from "../src/agent.mjs";
 
 test("parses a fenced tool call", () => {
   const a = parse('```json\n{"tool":"shell","args":{"command":"ls"}}\n```');
@@ -47,4 +48,30 @@ test("result rendering truncates instead of flooding the turn", () => {
   const out = renderResult({ stdout: "x".repeat(20_000) }, 500);
   assert.ok(out.length < 900);
   assert.match(out, /truncated/);
+});
+
+test("parseReply splits prose from the calls it carries", () => {
+  const { text, calls } = parseReply('Reading both.\n```json\n{"tool":"read","args":{"path":"/a"}}\n```\n```json\n{"tool":"read","args":{"path":"/b"}}\n```');
+  assert.equal(text, "Reading both.");
+  assert.deepEqual(
+    calls.map((c) => c.args.path),
+    ["/a", "/b"],
+  );
+});
+
+test("parseReply treats a reply with no fenced call as a finished turn", () => {
+  const { text, calls } = parseReply("The file defines two exports.");
+  assert.equal(calls.length, 0);
+  assert.equal(text, "The file defines two exports.");
+});
+
+test("parseReply ignores json quoted in prose — only fences are the ABI", () => {
+  const { calls } = parseReply('You could call {"tool":"rm","args":{}} but I will not.');
+  assert.equal(calls.length, 0);
+});
+
+test("parseReply leaves non-call fenced blocks in the text", () => {
+  const { text, calls } = parseReply('Here:\n```json\n{"port": 8080}\n```');
+  assert.equal(calls.length, 0);
+  assert.match(text, /8080/);
 });

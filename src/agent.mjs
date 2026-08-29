@@ -7,7 +7,53 @@
 
 import { Session } from "./browser.mjs";
 import { tools } from "./tools/index.mjs";
-import { parse, renderResult, systemPrompt } from "./protocol.mjs";
+import { parse } from "./protocol.mjs";
+
+/** The CLI's own system prompt: its tools, its one-call-per-reply discipline.
+ *  The pi provider serves pi's tools instead — see src/pi/serialize.mjs. */
+export function systemPrompt(task, cwd) {
+  const specs = [...tools.values()].map((t) => {
+    const args = Object.entries(t.schema)
+      .map(([k, v]) => `${k}: ${v.type}${v.optional ? "?" : ""} — ${v.description}`)
+      .join("\n    ");
+    return `- ${t.name}: ${t.description}\n    ${args}`;
+  });
+
+  return `You are a coding agent acting on a real machine. You cannot touch it directly — I execute your tool calls and paste the results back.
+
+Working directory: ${cwd}
+
+TOOLS
+${specs.join("\n")}
+
+PROTOCOL
+Every reply is exactly one fenced json block and nothing else. No prose outside it.
+
+To act:
+\`\`\`json
+{"tool": "shell", "args": {"command": "ls -la"}}
+\`\`\`
+
+When the task is complete:
+\`\`\`json
+{"done": "one-line summary of what you did and what you found"}
+\`\`\`
+
+RULES
+- One tool call per reply. Wait for the result before the next.
+- Verify by contact: after writing files, run them or test them.
+- Do not narrate, apologize, or ask permission. Act.
+- If a tool errors, adapt and continue; if truly blocked, emit done with the reason.
+
+TASK
+${task}`;
+}
+
+export function renderResult(result, maxChars = 6000) {
+  let text = typeof result === "string" ? result : JSON.stringify(result, null, 2);
+  if (text.length > maxChars) text = `${text.slice(0, maxChars)}\n…[truncated ${text.length - maxChars} chars]`;
+  return `TOOL RESULT\n\`\`\`json\n${text}\n\`\`\`\nNext tool call, or done.`;
+}
 
 export async function run(task, { cwd = process.cwd(), maxSteps = 20, log = () => {} } = {}) {
   const session = await new Session().open();
