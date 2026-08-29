@@ -9,6 +9,8 @@ import { tools } from "../src/tools/index.mjs";
 const shell = tools.get("shell");
 const fileRead = tools.get("file_read");
 const fileWrite = tools.get("file_write");
+const grep = tools.get("grep");
+const git = tools.get("git");
 
 describe("shell", () => {
   it("runs a command and returns stdout", () => {
@@ -93,5 +95,50 @@ describe("file_write", () => {
       () => fileWrite.execute({ path: "/tmp/x" }),
       /content is required/
     );
+  });
+});
+
+describe("grep", () => {
+  it("finds matches in files", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "pi-chatgpt-test-"));
+    writeFileSync(join(tmp, "a.txt"), "hello world\nfoo bar\nhello again");
+
+    const result = grep.execute({ pattern: "hello", path: tmp });
+    assert.equal(result.total, 2);
+    assert.equal(result.matches.length, 2);
+  });
+
+  it("returns empty on no match", () => {
+    const result = grep.execute({ pattern: "ZZZZNOTFOUND", path: "/tmp" });
+    assert.equal(result.total, 0);
+  });
+
+  it("respects max_results", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "pi-chatgpt-test-"));
+    writeFileSync(join(tmp, "a.txt"), "x\nx\nx\nx\nx");
+
+    const result = grep.execute({ pattern: "x", path: tmp, max_results: 2 });
+    assert.equal(result.matches.length, 2);
+    assert.equal(result.truncated, true);
+  });
+
+  it("rejects missing pattern", () => {
+    assert.throws(() => grep.execute({}), /pattern is required/);
+  });
+});
+
+describe("git", () => {
+  it("runs git status", () => {
+    const result = git.execute({ subcommand: "status --short", cwd: process.cwd() });
+    assert.equal(typeof result.exit_code, "number");
+  });
+
+  it("runs git log", () => {
+    const result = git.execute({ subcommand: "log --oneline -3", cwd: process.cwd() });
+    assert.equal(result.exit_code, 0);
+  });
+
+  it("rejects missing subcommand", () => {
+    assert.throws(() => git.execute({}), /subcommand is required/);
   });
 });

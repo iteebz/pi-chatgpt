@@ -65,7 +65,7 @@ describe("MCP server", () => {
       sendJsonRpc(proc, "tools/list", {}, 2);
       const toolsResult = await readJsonRpc(proc);
       const toolNames = toolsResult.result.tools.map((t) => t.name).sort();
-      assert.deepEqual(toolNames, ["file_read", "file_write", "shell"]);
+      assert.deepEqual(toolNames, ["file_read", "file_write", "git", "grep", "shell"]);
     } finally {
       proc.kill();
     }

@@ -25,11 +25,20 @@ node src/server.mjs       # start MCP server on stdio
 1. Create a [Tunnel](https://platform.openai.com/tunnels) and API key on the
    same OpenAI account you'll use in ChatGPT web.
 
-2. Run the tunnel, pointing at this server:
+2. Run the tunnel:
 
    ```bash
-   npx @openai/tunnel-client --tunnel-id YOUR_TUNNEL_ID --api-key YOUR_KEY \
-     -- node src/server.mjs
+   brew install openai/tools/tunnel-client
+
+   export CONTROL_PLANE_TUNNEL_ID='tunnel_...'
+   export CONTROL_PLANE_API_KEY='your-runtime-key'
+
+   tunnel-client init --sample sample_mcp_stdio_local --profile pi-chatgpt \
+     --tunnel-id $CONTROL_PLANE_TUNNEL_ID \
+     --mcp-command "node $(pwd)/src/server.mjs"
+
+   tunnel-client doctor --profile pi-chatgpt --explain
+   tunnel-client run --profile pi-chatgpt
    ```
 
 3. In ChatGPT web:
@@ -50,6 +59,11 @@ node src/server.mjs       # start MCP server on stdio
 | `shell` | Execute a command, get stdout/stderr/exit code |
 | `file_read` | Read a file or list a directory |
 | `file_write` | Write a file (creates parents) |
+| `grep` | Recursive search with file/line results |
+| `git` | Git operations (status, diff, log, commit, etc.) |
+
+The server also exposes an `environment` resource with OS, shell, cwd,
+git branch, and project markers — so ChatGPT knows what it's working on.
 
 ## Tests
 

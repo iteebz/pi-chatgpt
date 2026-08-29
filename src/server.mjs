@@ -23,6 +23,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { tools } from "./tools/index.mjs";
+import { formatContext } from "./context.mjs";
 
 const server = new McpServer({
   name: "pi-chatgpt",
@@ -44,6 +45,17 @@ function toZodSchema(schema) {
   }
   return shape;
 }
+
+// Register environment context as a resource
+server.resource("environment", "context://environment", async (uri) => ({
+  contents: [
+    {
+      uri: uri.href,
+      mimeType: "text/plain",
+      text: formatContext(),
+    },
+  ],
+}));
 
 // Register each tool with the MCP server
 for (const [name, tool] of tools) {
