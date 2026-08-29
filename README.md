@@ -101,26 +101,31 @@ node bin/cli.mjs agent "..."   # live probe against ChatGPT Plus
 
 ## Prior art
 
-This project takes the opposite approach from browser-automation tools:
+Two projects sit adjacent. Neither does what this does.
 
-- **[codex-chatgpt-web](https://github.com/miuuyy/codex-chatgpt-web)** —
-  Playwright drives ChatGPT's web UI, translates to Codex's Responses API.
-  Complex (~38k LOC), fragile to DOM changes. Its "full harness" MCP mode
-  (ChatGPT calling back to Codex tools) is the closest ancestor to what
-  pi-chatgpt does, but codex-chatgpt-web also automates the browser side.
+| | how ChatGPT gets tools | who drives | needs | core LOC |
+|---|---|---|---|---|
+| **pi-chatgpt** | fenced JSON in the chat | ChatGPT drives your machine | a logged-in browser | ~270 |
+| [codex-chatgpt-web](https://github.com/miuuyy/codex-chatgpt-web) | native MCP over OpenAI tunnel | ChatGPT drives Codex's harness | tunnel binary + runtime key + dev mode | ~36k |
+| [agentify-sh/desktop](https://github.com/agentify-sh/desktop) | n/a — ChatGPT is asked, not armed | your agent queries ChatGPT | Electron control center | ~1.9k |
 
-- **[agentify-sh/desktop](https://github.com/agentify-sh/desktop)** —
-  Electron app exposing MCP tools that type into ChatGPT/Claude/etc web UIs.
-  Same browser automation approach, wrapped in MCP. Generic across providers
-  but fundamentally dependent on DOM selectors.
+**codex-chatgpt-web** is the closest ancestor and the strongest project of the
+three: real compaction, retries, five browser tabs, cross-platform launcher. It
+reaches ChatGPT the official way — a tunnel and an MCP connector — and spends
+~3.6k lines on a browser worker to make the web UI behave like the Responses
+API. The cost is the setup: a pinned `tunnel-client` binary, a runtime API key,
+Developer Mode, a connector. We took the unofficial way and needed none of it.
 
-- **Codex itself** — the tool contract (shell, file read/write) that pi-chatgpt
-  reimplements as a standalone MCP server.
+**agentify-desktop** points the other direction. Its MCP tools let *your* agent
+ask ChatGPT a question ("get a second opinion", "read this tab"). ChatGPT never
+touches your filesystem. Useful, but not an agent loop.
 
-pi-chatgpt keeps the browser layer minimal: one `ask()` primitive, no Codex
-API translation, no Electron shell. The tool contract lives in local code, so
-DOM drift can only break transport, never behavior. The MCP server path exists
-for anyone who prefers no browser at all.
+The bet here: ChatGPT is smart enough that the tool ABI can be prose. That
+deletes the tunnel, the connector, the API key, the daemon, and the Responses
+translation layer — everything between the model and the shell. `Session.ask()`
+is the entire dependency on ChatGPT, so DOM drift can only break transport,
+never behavior. The MCP server path remains for anyone who prefers the official
+route.
 
 ## License
 
