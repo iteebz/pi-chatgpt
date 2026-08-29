@@ -104,13 +104,40 @@ export class Session {
     throw new Error("Response never stabilized");
   }
 
+  /**
+   * Read the last assistant turn back as markdown.
+   *
+   * `innerText` alone is not enough: a fenced block renders to `<pre><code>`,
+   * where the fences are gone and the language survives only as a UI label. The
+   * model emits `\`\`\`json {...}\`\`\`` and the DOM hands back `JSON\n{...}` —
+   * which the fenced-only provider parser correctly refuses. So reconstruct the
+   * fences from the code elements instead of reading the rendered surface.
+   */
   async #lastTurnText() {
     return this.page.evaluate((sel) => {
       const turns = document.querySelectorAll(sel);
       const last = turns[turns.length - 1];
       if (!last) return "";
-      const md = last.querySelector(".markdown");
-      return (md?.innerText || last.innerText || "").trim();
+      const root = last.querySelector(".markdown") || last;
+
+      const fence = (pre) => {
+        const code = pre.querySelector("code");
+        const lang = [...(code?.classList ?? [])].find((c) => c.startsWith("language-"))?.slice(9) ?? "";
+        return `\`\`\`${lang}\n${(code ?? pre).textContent.trim()}\n\`\`\``;
+      };
+
+      const read = (node) => {
+        if (!node.children.length) return node.innerText ?? node.textContent ?? "";
+        const parts = [];
+        for (const child of node.children) {
+          if (child.tagName === "PRE") parts.push(fence(child));
+          else if (child.querySelector("pre")) parts.push(read(child));
+          else parts.push(child.innerText ?? child.textContent ?? "");
+        }
+        return parts.filter((p) => p.trim()).join("\n\n");
+      };
+
+      return read(root).trim();
     }, SEL.assistant);
   }
 }
