@@ -16,7 +16,7 @@ ChatGPT decides. Local code executes. The browser is just the wire.
 ```bash
 npm install
 node bin/cli.mjs agent "write fizzbuzz.py in /tmp, run it, confirm the output"
-node bin/cli.mjs consult -f transcript.md "judge the interviewer. be blunt."
+node bin/cli.mjs ask -s 0 "what would you do next?"
 ```
 
 That's it. The browser launches automatically — Arc if running (inherits your
@@ -33,16 +33,33 @@ Environment variables for control:
 | `PI_CHATGPT_DEBUG` | unset | Log turn shape to stderr |
 | `PI_CHATGPT_TRACE` | unset | Write verbatim thread transcript to file |
 
-## Consult
+## Ask
 
-`consult` is the inverse of `agent`: ChatGPT is asked, not armed. One turn, no
-tools, no protocol — a file drop plus a question, answer to stdout.
+`ask` is the inverse of `agent`: ChatGPT is asked, not armed. No tools, no
+protocol — context in, answer to stdout.
+
+```bash
+pi-chatgpt ask "is this idea stupid?"                 # nothing but memory
+pi-chatgpt ask -f spec.md "review this adversarially" # a document
+pi-chatgpt sessions                                    # pi sessions here
+pi-chatgpt ask -s 2 "this died mid-flight. what next?" # a pi session
+```
 
 It runs in a **personalized temporary chat**, which reads your memory, custom
-instructions, and plugins but writes no memories and leaves no history. So you
-get the judgment of the persona you have already tuned, without polluting it.
-Temporary chats default to unpersonalized and lock the choice at the first
-message; the session flips the pill before sending.
+instructions, and plugins but writes no memories and leaves no history. That is
+the whole point: you get the judgment of a persona tuned over months of real
+conversations, and dropping a transcript into it pollutes nothing. Temporary
+chats default to unpersonalized and lock the choice at the first message, so
+the session flips the pill before sending.
+
+**Drop chain.** Context over ~12k chars is delivered as N acknowledged chunks
+before the question, at Instant thinking; the question itself runs at High. A
+50k-char pi session is four chunks and answers in ~80s.
+
+**`-s` reads pi's own `.jsonl`** from `~/.pi/agent/sessions/<cwd-slug>/`,
+rendered to narrative markdown: human turns, agent prose, tool calls, and tool
+results clipped to 600 chars. Kit sees what the session *did*, not every byte
+it read — enough to plan, not enough to audit.
 
 ## Tools
 
@@ -68,7 +85,7 @@ tool result back, `{"done": "..."}` to finish.
 
 ## What works and what doesn't
 
-**Consult — reliable.** One-shot, single DOM interaction beyond `ask()`.
+**Ask — reliable.** One DOM interaction beyond `ask()`, then plain turns.
 
 **Standalone CLI — reliable.** The agent loop (`bin/cli.mjs agent`) follows the
 fenced-JSON protocol consistently. Tested across 40+ turns with zero protocol

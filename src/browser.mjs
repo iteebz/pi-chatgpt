@@ -89,6 +89,12 @@ export class Session {
     await sleep(800);
   }
 
+  /** Change the thinking slider mid-thread. Chunk delivery wants Instant; the
+   *  question wants High. */
+  async setThinking(level) {
+    return this.#setThinking(level);
+  }
+
   async #setThinking(level) {
     const target = THINKING_LEVELS.indexOf(level);
     if (target < 0) return;

@@ -4,28 +4,51 @@
  * pi-chatgpt CLI.
  *
  * Usage:
- *   pi-chatgpt agent <task>          Run the browser agent loop (ChatGPT drives, we execute)
- *   pi-chatgpt consult [-f f] <q>   One-shot ask with memory, no memory writes
- *   pi-chatgpt test                 Run a quick self-test
+ *   pi-chatgpt agent <task>               Browser agent loop (ChatGPT drives, we execute)
+ *   pi-chatgpt ask [-f file] [-s n] <q>   Ask Kit — your memory, your instructions, free
+ *   pi-chatgpt sessions [cwd]             List pi sessions, newest first
+ *   pi-chatgpt test                       Quick self-test
  */
 
 const cmd = process.argv[2];
+const log = (m) => console.error(`[pi-chatgpt] ${m}`);
 
-if (cmd === "consult") {
-  const args = process.argv.slice(3);
+if (cmd === "ask") {
+  const argv = process.argv.slice(3);
   const files = [];
   const words = [];
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === "-f" || args[i] === "--file") files.push(args[++i]);
-    else words.push(args[i]);
+  let session = null;
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === "-f" || argv[i] === "--file") files.push(argv[++i]);
+    else if (argv[i] === "-s" || argv[i] === "--session") session = argv[++i] ?? "0";
+    else words.push(argv[i]);
   }
   const question = words.join(" ");
   if (!question) {
-    console.error("Usage: pi-chatgpt consult [-f <file>]... <question>");
+    console.error("Usage: pi-chatgpt ask [-f <file>]... [-s <n>] <question>");
     process.exit(1);
   }
+
+  let context = "";
+  if (session !== null) {
+    const { sessions, render, title } = await import("../src/session-log.mjs");
+    const list = sessions(process.cwd());
+    const file = /^\d+$/.test(session) ? list[Number(session)] : list.find((f) => f.includes(session));
+    if (!file) {
+      console.error(`No session "${session}" for ${process.cwd()}`);
+      process.exit(1);
+    }
+    log(`session: ${title(file)}`);
+    context = render(file);
+  }
+
   const { consult } = await import("../src/consult.mjs");
-  console.log(await consult(question, { files }));
+  console.log(await consult(question, { files, context, log }));
+} else if (cmd === "sessions") {
+  const { sessions, title } = await import("../src/session-log.mjs");
+  sessions(process.argv[3] || process.cwd())
+    .slice(0, 20)
+    .forEach((f, i) => console.log(`${i}\t${title(f)}`));
 } else if (cmd === "agent" || (!cmd && process.argv.length > 2)) {
   const task = process.argv.slice(3).join(" ");
   if (!task) {
@@ -48,6 +71,6 @@ if (cmd === "consult") {
   console.log(`✓ ${tools.size} tools registered: ${[...tools.keys()].join(", ")}`);
 } else {
   console.error(`Unknown command: ${cmd}`);
-  console.error("Usage: pi-chatgpt [agent <task>|consult [-f <file>]... <question>|test]");
+  console.error("Usage: pi-chatgpt [agent|ask|sessions|test]");
   process.exit(1);
 }

@@ -25,7 +25,7 @@ prose. Everything above is a consumer.
 thing: `pi-chatgpt agent "<task>"`. It exists to prove the core and to run
 without pi. Zero protocol violations across 40+ tested turns.
 
-**Consult (reliable).** `pi-chatgpt consult [-f <file>]... "<question>"` — the
+**Ask (reliable).** `pi-chatgpt ask [-f <file>] [-s <n>] "<question>"` — the
 agent loop's inverse: ChatGPT is asked, not armed. One turn, no tools, no
 protocol; only the core's `ask()`. The value is the context you already own:
 a *personalized* temporary chat reads your memory, custom instructions, and
