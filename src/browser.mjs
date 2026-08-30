@@ -35,16 +35,23 @@ const SEL = {
   sliderControl: '.d1BZWq_SliderControl',
 };
 
+/** Temporary chats start unpersonalized: no memory, no custom instructions.
+ *  Personalized reads memory but never writes it — the consult mode's whole
+ *  point. The choice is locked once the first message is sent. */
+const PERSONALIZE_PILL = "Unpersonalized";
+const PERSONALIZE_ITEM = "Personalized";
+
 const THINKING_LEVELS = ["Instant", "Medium", "High"];
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export class Session {
-  constructor({ timeoutMs = 300_000, verbose = false, thinking = null } = {}) {
+  constructor({ timeoutMs = 300_000, verbose = false, thinking = null, personalize = false } = {}) {
     this.timeoutMs = timeoutMs;
     this.verbose = verbose;
     /** @type {"Instant"|"Medium"|"High"|null} */
     this.thinking = thinking;
+    this.personalize = personalize;
   }
 
   async open() {
@@ -57,12 +64,29 @@ export class Session {
     await this.page.goto(CHAT_URL, { waitUntil: "domcontentloaded" });
     await this.page.waitForSelector(SEL.composer, { timeout: 30_000 });
     await sleep(500);
+    if (this.personalize) await this.#setPersonalized();
     if (this.thinking) await this.#setThinking(this.thinking);
     return this;
   }
 
   async close() {
     await this.browser?.close();
+  }
+
+  /** Flip the temporary chat to personalized. Idempotent: the pill only reads
+   *  "Unpersonalized" while the choice is still open and still unmade. */
+  async #setPersonalized() {
+    const pill = this.page.getByText(PERSONALIZE_PILL, { exact: true }).first();
+    if (!(await pill.isVisible().catch(() => false))) return;
+    await pill.click();
+    await sleep(1000);
+    const item = this.page
+      .getByRole("menuitemradio")
+      .filter({ hasText: PERSONALIZE_ITEM })
+      .first();
+    if (await item.isVisible().catch(() => false)) await item.click();
+    else await this.page.keyboard.press("Escape");
+    await sleep(800);
   }
 
   async #setThinking(level) {

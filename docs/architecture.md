@@ -9,13 +9,12 @@ that was never drawn. Draw it and the convolution disappears.
 ## The layers
 
 ```
-        ┌─ pi provider (premier surface) ──┐   ┌─ agent CLI (standalone) ─┐
-        │  pi owns loop, tools, context    │   │  own loop, own tools     │
-        └───────────────┬──────────────────┘   └────────────┬─────────────┘
-                        │                                   │
-                        └─────────── core ──────────────────┘
-                             browser.mjs  ask(text) → reply
-                             protocol.mjs text ⇄ tool calls
+  ┌─ pi provider ────┐  ┌─ agent CLI ──────┐  ┌─ consult ────────┐
+  │ pi owns the loop │  │ own loop + tools │  │ no loop, one ask │
+  └────────┬─────────┘  └────────┬─────────┘  └────────┬─────────┘
+           └──────────────────── core ─────────────────┘
+                    browser.mjs  ask(text) → reply
+                    protocol.mjs text ⇄ tool calls
 ```
 
 **Core (proven).** `Session.ask()` is the entire dependency on ChatGPT: one
@@ -25,6 +24,17 @@ prose. Everything above is a consumer.
 **Agent CLI (reliable).** Local loop, local tools. This is the Codex-shaped
 thing: `pi-chatgpt agent "<task>"`. It exists to prove the core and to run
 without pi. Zero protocol violations across 40+ tested turns.
+
+**Consult (reliable).** `pi-chatgpt consult [-f <file>]... "<question>"` — the
+agent loop's inverse: ChatGPT is asked, not armed. One turn, no tools, no
+protocol; only the core's `ask()`. The value is the context you already own:
+a *personalized* temporary chat reads your memory, custom instructions, and
+plugins, but writes no memories and leaves no history. So a transcript drop
+gets your persona's judgment at zero context pollution.
+
+Temporary chats start **unpersonalized** and the choice locks at the first
+message — `Session({ personalize: true })` flips the composer pill during
+`open()`. Probed: memory and custom instructions both present in the reply.
 
 **pi provider (broken).** The pi-cc analogue. pi owns the loop, tools, context,
 skills, TUI. ChatGPT is only the model. In practice, ChatGPT ignores the

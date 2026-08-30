@@ -4,13 +4,29 @@
  * pi-chatgpt CLI.
  *
  * Usage:
- *   pi-chatgpt agent <task>  Run the browser agent loop (ChatGPT drives, we execute)
- *   pi-chatgpt test          Run a quick self-test
+ *   pi-chatgpt agent <task>          Run the browser agent loop (ChatGPT drives, we execute)
+ *   pi-chatgpt consult [-f f] <q>   One-shot ask with memory, no memory writes
+ *   pi-chatgpt test                 Run a quick self-test
  */
 
 const cmd = process.argv[2];
 
-if (cmd === "agent" || (!cmd && process.argv.length > 2)) {
+if (cmd === "consult") {
+  const args = process.argv.slice(3);
+  const files = [];
+  const words = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "-f" || args[i] === "--file") files.push(args[++i]);
+    else words.push(args[i]);
+  }
+  const question = words.join(" ");
+  if (!question) {
+    console.error("Usage: pi-chatgpt consult [-f <file>]... <question>");
+    process.exit(1);
+  }
+  const { consult } = await import("../src/consult.mjs");
+  console.log(await consult(question, { files }));
+} else if (cmd === "agent" || (!cmd && process.argv.length > 2)) {
   const task = process.argv.slice(3).join(" ");
   if (!task) {
     console.error("Usage: pi-chatgpt agent <task>");
@@ -32,6 +48,6 @@ if (cmd === "agent" || (!cmd && process.argv.length > 2)) {
   console.log(`✓ ${tools.size} tools registered: ${[...tools.keys()].join(", ")}`);
 } else {
   console.error(`Unknown command: ${cmd}`);
-  console.error("Usage: pi-chatgpt [agent <task>|test]");
+  console.error("Usage: pi-chatgpt [agent <task>|consult [-f <file>]... <question>|test]");
   process.exit(1);
 }

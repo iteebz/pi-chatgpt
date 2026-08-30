@@ -16,6 +16,7 @@ ChatGPT decides. Local code executes. The browser is just the wire.
 ```bash
 npm install
 node bin/cli.mjs agent "write fizzbuzz.py in /tmp, run it, confirm the output"
+node bin/cli.mjs consult -f transcript.md "judge the interviewer. be blunt."
 ```
 
 That's it. The browser launches automatically — Arc if running (inherits your
@@ -31,6 +32,17 @@ Environment variables for control:
 | `PI_CHATGPT_PROFILE` | `~/.pi-chatgpt/chrome-profile` | Chrome profile for auto-launch |
 | `PI_CHATGPT_DEBUG` | unset | Log turn shape to stderr |
 | `PI_CHATGPT_TRACE` | unset | Write verbatim thread transcript to file |
+
+## Consult
+
+`consult` is the inverse of `agent`: ChatGPT is asked, not armed. One turn, no
+tools, no protocol — a file drop plus a question, answer to stdout.
+
+It runs in a **personalized temporary chat**, which reads your memory, custom
+instructions, and plugins but writes no memories and leaves no history. So you
+get the judgment of the persona you have already tuned, without polluting it.
+Temporary chats default to unpersonalized and lock the choice at the first
+message; the session flips the pill before sending.
 
 ## Tools
 
@@ -55,6 +67,8 @@ tool result back, `{"done": "..."}` to finish.
    `--headless`, so this is a real browser you never see.
 
 ## What works and what doesn't
+
+**Consult — reliable.** One-shot, single DOM interaction beyond `ask()`.
 
 **Standalone CLI — reliable.** The agent loop (`bin/cli.mjs agent`) follows the
 fenced-JSON protocol consistently. Tested across 40+ turns with zero protocol
