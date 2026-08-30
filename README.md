@@ -16,7 +16,7 @@ ChatGPT decides. Local code executes. The browser is just the wire.
 ```bash
 npm install
 node bin/cli.mjs agent "write fizzbuzz.py in /tmp, run it, confirm the output"
-node bin/cli.mjs ask -s 0 "what would you do next?"
+node bin/cli.mjs consult -s 0 "what would you do next?"
 ```
 
 That's it. The browser launches automatically — Arc if running (inherits your
@@ -33,16 +33,16 @@ Environment variables for control:
 | `PI_CHATGPT_DEBUG` | unset | Log turn shape to stderr |
 | `PI_CHATGPT_TRACE` | unset | Write verbatim thread transcript to file |
 
-## Ask
+## Consult
 
-`ask` is the inverse of `agent`: ChatGPT is asked, not armed. No tools, no
+`consult` is the inverse of `agent`: ChatGPT is asked, not armed. No tools, no
 protocol — context in, answer to stdout.
 
 ```bash
-pi-chatgpt ask "is this idea stupid?"                 # nothing but memory
-pi-chatgpt ask -f spec.md "review this adversarially" # a document
+pi-chatgpt consult "is this idea stupid?"                 # nothing but memory
+pi-chatgpt consult -f spec.md "review this adversarially" # a document
 pi-chatgpt sessions                                    # pi sessions here
-pi-chatgpt ask -s 2 "this died mid-flight. what next?" # a pi session
+pi-chatgpt consult -s 2 "this died mid-flight. what next?" # a pi session
 ```
 
 It runs in a **personalized temporary chat**, which reads your memory, custom
@@ -85,7 +85,7 @@ tool result back, `{"done": "..."}` to finish.
 
 ## What works and what doesn't
 
-**Ask — reliable.** One DOM interaction beyond `ask()`, then plain turns.
+**Consult — reliable.** One DOM interaction beyond `ask()`, then plain turns.
 
 **Standalone CLI — reliable.** The agent loop (`bin/cli.mjs agent`) follows the
 fenced-JSON protocol consistently. Tested across 40+ turns with zero protocol

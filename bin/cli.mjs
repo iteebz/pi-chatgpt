@@ -5,7 +5,7 @@
  *
  * Usage:
  *   pi-chatgpt agent <task>               Browser agent loop (ChatGPT drives, we execute)
- *   pi-chatgpt ask [-f file] [-s n] <q>   Ask Kit — your memory, your instructions, free
+ *   pi-chatgpt consult [-f file] [-s n] <q>   Ask Kit — your memory, your instructions, free
  *   pi-chatgpt sessions [cwd]             List pi sessions, newest first
  *   pi-chatgpt test                       Quick self-test
  */
@@ -13,7 +13,7 @@
 const cmd = process.argv[2];
 const log = (m) => console.error(`[pi-chatgpt] ${m}`);
 
-if (cmd === "ask") {
+if (cmd === "consult") {
   const argv = process.argv.slice(3);
   const files = [];
   const words = [];
@@ -25,7 +25,7 @@ if (cmd === "ask") {
   }
   const question = words.join(" ");
   if (!question) {
-    console.error("Usage: pi-chatgpt ask [-f <file>]... [-s <n>] <question>");
+    console.error("Usage: pi-chatgpt consult [-f <file>]... [-s <n>] <question>");
     process.exit(1);
   }
 
@@ -71,6 +71,6 @@ if (cmd === "ask") {
   console.log(`✓ ${tools.size} tools registered: ${[...tools.keys()].join(", ")}`);
 } else {
   console.error(`Unknown command: ${cmd}`);
-  console.error("Usage: pi-chatgpt [agent|ask|sessions|test]");
+  console.error("Usage: pi-chatgpt [agent|consult|sessions|test]");
   process.exit(1);
 }
