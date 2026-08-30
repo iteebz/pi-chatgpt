@@ -17,6 +17,7 @@ ChatGPT decides. Local code executes. The browser is just the wire.
 npm install
 node bin/cli.mjs agent "write fizzbuzz.py in /tmp, run it, confirm the output"
 node bin/cli.mjs consult -s 0 "what would you do next?"
+node bin/cli.mjs open kit && node bin/cli.mjs send kit "let's think about this"
 ```
 
 That's it. The browser launches automatically — Arc if running (inherits your
@@ -41,7 +42,7 @@ protocol — context in, answer to stdout.
 ```bash
 pi-chatgpt consult "is this idea stupid?"                 # nothing but memory
 pi-chatgpt consult -f spec.md "review this adversarially" # a document
-pi-chatgpt sessions                                    # pi sessions here
+pi-chatgpt sessions                                        # pi sessions here
 pi-chatgpt consult -s 2 "this died mid-flight. what next?" # a pi session
 ```
 
@@ -54,12 +55,31 @@ the session flips the pill before sending.
 
 **Drop chain.** Context over ~12k chars is delivered as N acknowledged chunks
 before the question, at Instant thinking; the question itself runs at High. A
-50k-char pi session is four chunks and answers in ~80s.
+70k-char pi session is six chunks and answers in ~90s.
 
 **`-s` reads pi's own `.jsonl`** from `~/.pi/agent/sessions/<cwd-slug>/`,
 rendered to narrative markdown: human turns, agent prose, tool calls, and tool
-results clipped to 600 chars. Kit sees what the session *did*, not every byte
-it read — enough to plan, not enough to audit.
+results clipped to 600 chars. It sees what the session *did*, not every byte it
+read — enough to plan, not enough to audit.
+
+## Channels
+
+A `consult` is one question with no memory of the last. A **channel** is the
+conversation: open once, send many, close when done.
+
+```bash
+pi-chatgpt open kit                      # a named tab, personalized
+pi-chatgpt send kit "here's the problem"  # accepts -f and -s too
+pi-chatgpt send kit "so what breaks?"     # remembers the turn before
+pi-chatgpt channels                       # what's open
+pi-chatgpt close kit                      # done
+```
+
+**The tab is the entire store.** State lives in the browser, not on disk — no
+daemon, no session file, nothing to garbage collect. Channels are found by a
+`sessionStorage` tag, so quitting the browser ends them, which is right for a
+conversation that was never meant to persist. `consult` is just `open` → `send`
+→ `close` collapsed into one call.
 
 ## Tools
 

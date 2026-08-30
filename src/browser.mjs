@@ -6,6 +6,10 @@
  * Turn boundaries come from assistant turn count, not text diffing, so a reply
  * identical to the previous one still resolves.
  *
+ * A named session is a *channel*: the tab stays open between CLI invocations and
+ * holds all the state, so there is no daemon and nothing to serialize. Channels
+ * are found by a sessionStorage tag on the tab, which dies with it.
+ *
  * See docs/findings.md for why DOM polling and not network interception.
  */
 
@@ -42,35 +46,95 @@ const PERSONALIZE_PILL = "Unpersonalized";
 const PERSONALIZE_ITEM = "Personalized";
 
 const THINKING_LEVELS = ["Instant", "Medium", "High"];
+const TAG = "pi-chatgpt-channel";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/** Run a callback over the tagged channel tabs, then disconnect. */
+async function withChannelTabs(fn) {
+  await ensureCDP();
+  const browser = await chromium.connectOverCDP(CDP_URL);
+  try {
+    const pages = (browser.contexts()[0]?.pages() ?? []).filter((p) => p.url().includes("chatgpt"));
+    const named = await Promise.all(
+      pages.map(async (page) => ({
+        page,
+        name: await page.evaluate((t) => sessionStorage.getItem(t), TAG).catch(() => null),
+      })),
+    );
+    return await fn(named.filter((t) => t.name));
+  } finally {
+    await browser.close();
+  }
+}
+
+/** Names of the channels currently open. */
+export const channels = () => withChannelTabs((tabs) => tabs.map((t) => t.name));
+
+/** Close a channel's tab. Returns false if it wasn't open. */
+export const closeChannel = (name) =>
+  withChannelTabs(async (tabs) => {
+    const hit = tabs.find((t) => t.name === name);
+    if (!hit) return false;
+    await hit.page.close().catch(() => {});
+    return true;
+  });
+
 export class Session {
-  constructor({ timeoutMs = 300_000, verbose = false, thinking = null, personalize = false } = {}) {
+  constructor({ timeoutMs = 300_000, verbose = false, thinking = null, personalize = false, channel = null } = {}) {
     this.timeoutMs = timeoutMs;
     this.verbose = verbose;
     /** @type {"Instant"|"Medium"|"High"|null} */
     this.thinking = thinking;
     this.personalize = personalize;
+    /** @type {string|null} name of a tab to reattach to or create */
+    this.channel = channel;
+    /** true when this call created the conversation rather than reattaching */
+    this.fresh = false;
   }
 
+  /** Attach to this channel's tab, or start a conversation if there isn't one. */
   async open() {
     await ensureCDP();
     this.browser = await chromium.connectOverCDP(CDP_URL);
     const ctx = this.browser.contexts()[0];
     if (!ctx) throw new Error("No browser context found");
 
-    this.page = ctx.pages().find((p) => p.url().includes("chatgpt")) || (await ctx.newPage());
+    if (this.channel) this.page = await this.#findTagged(ctx);
+    if (this.page) return this;
+
+    // A channel gets its own tab; a one-shot may borrow any idle ChatGPT tab.
+    this.page = this.channel
+      ? await ctx.newPage()
+      : ctx.pages().find((p) => p.url().includes("chatgpt")) || (await ctx.newPage());
     await this.page.goto(CHAT_URL, { waitUntil: "domcontentloaded" });
     await this.page.waitForSelector(SEL.composer, { timeout: 30_000 });
     await sleep(500);
+    if (this.channel) await this.page.evaluate(([t, n]) => sessionStorage.setItem(t, n), [TAG, this.channel]);
     if (this.personalize) await this.#setPersonalized();
     if (this.thinking) await this.#setThinking(this.thinking);
+    this.fresh = true;
     return this;
   }
 
+  async #findTagged(ctx) {
+    for (const p of ctx.pages()) {
+      if (!p.url().includes("chatgpt")) continue;
+      const name = await p.evaluate((t) => sessionStorage.getItem(t), TAG).catch(() => null);
+      if (name === this.channel) return p;
+    }
+    return null;
+  }
+
+  /** Drop the CDP connection. The tab — and the conversation — survive. */
   async close() {
     await this.browser?.close();
+  }
+
+  /** End the conversation for good. */
+  async end() {
+    await this.page?.close().catch(() => {});
+    await this.close();
   }
 
   /** Flip the temporary chat to personalized. Idempotent: the pill only reads

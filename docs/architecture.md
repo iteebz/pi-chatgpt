@@ -9,9 +9,9 @@ that was never drawn. Draw it and the convolution disappears.
 ## The layers
 
 ```
-  ┌─ pi provider ────┐  ┌─ agent CLI ──────┐  ┌─ consult ────────┐
-  │ pi owns the loop │  │ own loop + tools │  │ no loop, one ask │
-  └────────┬─────────┘  └────────┬─────────┘  └────────┬─────────┘
+  ┌─ pi provider ────┐  ┌─ agent CLI ──────┐  ┌─ consult/channel ┐
+  │ pi owns the loop │  │ own loop + tools │  │ no loop, just ask │
+  └────────┬─────────┘  └────────┬─────────┘  └────────┬──────────┘
            └──────────────────── core ─────────────────┘
                     browser.mjs  ask(text) → reply
                     protocol.mjs text ⇄ tool calls
@@ -31,6 +31,12 @@ protocol; only the core's `ask()`. The value is the context you already own:
 a *personalized* temporary chat reads your memory, custom instructions, and
 plugins, but writes no memories and leaves no history. So a transcript drop
 gets your persona's judgment at zero context pollution.
+
+A **channel** (`open`/`send`/`channels`/`close`) holds that conversation across
+CLI invocations. The browser tab is the whole store: state lives in a
+`sessionStorage` tag on the page, so there is no daemon, no session file, and
+nothing to reconcile — quitting the browser ends every channel. `consult` is
+`open` → `send` → `close` collapsed.
 
 Temporary chats start **unpersonalized** and the choice locks at the first
 message — `Session({ personalize: true })` flips the composer pill during

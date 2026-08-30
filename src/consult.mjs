@@ -9,6 +9,8 @@
  * acknowledged with a token, then the question. Chunks run at Instant thinking
  * because acknowledging is not reasoning; the question runs at High.
  *
+ * `consult` is `send` against a throwaway channel: open, ask, close.
+ *
  * See docs/architecture.md for where this sits relative to the agent CLI.
  */
 
@@ -50,27 +52,40 @@ export function chunk(text, size = CHUNK) {
  * @param {{files?: string[], context?: string, thinking?: string, log?: (m: string) => void}} opts
  * @returns {Promise<string>} the final reply
  */
-export async function consult(question, { files = [], context = "", thinking = DEFAULT_THINKING, log = () => {} } = {}) {
-  const body = [context, files.length ? attach(files) : ""].filter(Boolean).join("\n\n");
-  const parts = body ? chunk(body) : [];
-  const session = new Session({ thinking: parts.length > 1 ? "Instant" : thinking, personalize: true });
+export async function consult(question, opts = {}) {
+  const session = new Session({ thinking: opts.thinking ?? DEFAULT_THINKING, personalize: true });
   await session.open();
-
   try {
-    if (parts.length <= 1) {
-      return await session.ask(parts.length ? `${parts[0]}\n\n---\n\n${question}` : question);
-    }
-
-    for (const [i, part] of parts.entries()) {
-      log(`chunk ${i + 1}/${parts.length} (${part.length} chars)`);
-      await session.ask(
-        `Context ${i + 1} of ${parts.length}. Do not answer or comment yet — reply with exactly "${ACK}". The question comes last.\n\n${part}`,
-      );
-    }
-    log(`asking (thinking: ${thinking})`);
-    await session.setThinking(thinking);
-    return await session.ask(`All ${parts.length} parts delivered. Now:\n\n${question}`);
+    return await turn(session, question, opts);
   } finally {
     await session.close();
   }
+}
+
+/**
+ * One turn on an already-open session: drop any context, then ask.
+ *
+ * @param {Session} session
+ * @param {string} question
+ * @param {{files?: string[], context?: string, thinking?: string, log?: (m: string) => void}} opts
+ * @returns {Promise<string>} the reply
+ */
+export async function turn(session, question, { files = [], context = "", thinking = DEFAULT_THINKING, log = () => {} } = {}) {
+  const body = [context, files.length ? attach(files) : ""].filter(Boolean).join("\n\n");
+  const parts = body ? chunk(body) : [];
+
+  if (parts.length <= 1) {
+    return session.ask(parts.length ? `${parts[0]}\n\n---\n\n${question}` : question);
+  }
+
+  await session.setThinking("Instant");
+  for (const [i, part] of parts.entries()) {
+    log(`chunk ${i + 1}/${parts.length} (${part.length} chars)`);
+    await session.ask(
+      `Context ${i + 1} of ${parts.length}. Do not answer or comment yet — reply with exactly "${ACK}". The question comes last.\n\n${part}`,
+    );
+  }
+  log(`asking (thinking: ${thinking})`);
+  await session.setThinking(thinking);
+  return session.ask(`All ${parts.length} parts delivered. Now:\n\n${question}`);
 }
