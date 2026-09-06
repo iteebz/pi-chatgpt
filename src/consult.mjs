@@ -17,6 +17,7 @@
 import { readFileSync } from "node:fs";
 import { basename } from "node:path";
 import { Session, DEFAULT_THINKING } from "./browser.mjs";
+import { log as audit } from "./audit.mjs";
 
 /** Composer ceiling. Well under the web limit — chunks are cheap, retries aren't. */
 const CHUNK = 12_000;
@@ -56,9 +57,11 @@ export async function consult(question, opts = {}) {
   const session = new Session({ thinking: opts.thinking ?? DEFAULT_THINKING, personalize: true });
   await session.open();
   try {
-    return await turn(session, question, opts);
+    const response = await turn(session, question, opts);
+    audit({ mode: "consult", message: question, response, files: opts.files, cwd: process.cwd() });
+    return response;
   } finally {
-    await session.close();
+    await session.end();
   }
 }
 

@@ -14,7 +14,7 @@
  */
 
 import { execSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { chromium } from "playwright-core";
@@ -97,24 +97,47 @@ export class Session {
   async open() {
     await ensureCDP();
     this.browser = await chromium.connectOverCDP(CDP_URL);
-    const ctx = this.browser.contexts()[0];
-    if (!ctx) throw new Error("No browser context found");
+    const ctx = await this.#context();
 
     if (this.channel) this.page = await this.#findTagged(ctx);
     if (this.page) return this;
 
-    // A channel gets its own tab; a one-shot may borrow any idle ChatGPT tab.
-    this.page = this.channel
-      ? await ctx.newPage()
-      : ctx.pages().find((p) => p.url().includes("chatgpt")) || (await ctx.newPage());
+    // Always a fresh tab. Borrowing an idle one lets two concurrent sessions
+    // share a conversation and read each other's replies as their own turn.
+    this.page = await ctx.newPage();
     await this.page.goto(CHAT_URL, { waitUntil: "domcontentloaded" });
-    await this.page.waitForSelector(SEL.composer, { timeout: 30_000 });
+    await this.#waitComposer();
     await sleep(500);
     if (this.channel) await this.page.evaluate(([t, n]) => sessionStorage.setItem(t, n), [TAG, this.channel]);
     if (this.personalize) await this.#setPersonalized();
     if (this.thinking) await this.#setThinking(this.thinking);
     this.fresh = true;
     return this;
+  }
+
+  /** A just-relaunched browser can report zero contexts for a beat. */
+  async #context() {
+    const deadline = Date.now() + 15_000;
+    while (Date.now() < deadline) {
+      const ctx = this.browser.contexts()[0];
+      if (ctx) return ctx;
+      await sleep(250);
+    }
+    throw new Error("No browser context found over CDP");
+  }
+
+  /** The composer is the proof we are logged in and past any challenge.
+   *  Without this, a login wall surfaces as a bare selector timeout. */
+  async #waitComposer() {
+    try {
+      await this.page.waitForSelector(SEL.composer, { timeout: 45_000 });
+    } catch {
+      const url = this.page.url();
+      if (/auth|login/i.test(url)) {
+        throw new Error(`ChatGPT is not logged in (${url}). Sign in to chatgpt.com in your browser.`);
+      }
+      throw new Error(`ChatGPT composer never appeared at ${url} \u2014 login wall or bot challenge.`);
+    }
   }
 
   async #findTagged(ctx) {
@@ -151,6 +174,10 @@ export class Session {
     if (await item.isVisible().catch(() => false)) await item.click();
     else await this.page.keyboard.press("Escape");
     await sleep(800);
+    // Memory is the whole reason to consult. Losing it silently is worse than noisy.
+    if (await pill.isVisible().catch(() => false)) {
+      process.stderr.write("[pi-chatgpt] warning: chat stayed unpersonalized \u2014 no memory this turn\n");
+    }
   }
 
   /** Change the thinking slider mid-thread. Chunk delivery wants Instant; the
@@ -343,9 +370,20 @@ async function tryAttachRunning() {
     if (!existsSync(`/Applications/${app}.app`)) continue;
     try {
       if (running(app)) {
-        process.stderr.write(`[pi-chatgpt] restarting ${app} with CDP on :${CDP_PORT}\n`);
-        execSync(`osascript -e 'quit app "${app}"'`, { timeout: 20_000, stdio: "ignore" });
+        process.stderr.write(
+          `[pi-chatgpt] restarting ${app} with CDP on :${CDP_PORT} - open channels will be lost\n`,
+        );
+        try {
+          execSync(`osascript -e 'quit app "${app}"'`, { timeout: 20_000, stdio: "ignore" });
+        } catch {}
         for (let i = 0; i < 40 && running(app); i++) await sleep(500);
+        // A modal or beforeunload handler can swallow the graceful quit.
+        if (running(app)) {
+          try {
+            execSync(`pkill -f "${app}.app/Contents/MacOS/"`, { stdio: "ignore" });
+          } catch {}
+          for (let i = 0; i < 20 && running(app); i++) await sleep(500);
+        }
         if (running(app)) continue;
       }
       execSync(`open -na "${app}" --args --remote-debugging-port=${CDP_PORT}`, {
@@ -363,9 +401,46 @@ async function tryAttachRunning() {
 
 let launched = false;
 
+const LOCK = join(homedir(), ".pi-chatgpt", "cdp.lock");
+const LOCK_STALE_MS = 120_000;
+
+const lockAge = () => {
+  try {
+    return Date.now() - statSync(LOCK).mtimeMs;
+  } catch {
+    return Infinity;
+  }
+};
+
+/** Serialize bring-up across concurrent agents: restarting the browser while
+ *  another session is mid-answer would kill its tab. Losers wait for CDP. */
+async function withBringupLock(fn) {
+  mkdirSync(join(homedir(), ".pi-chatgpt"), { recursive: true });
+  const deadline = Date.now() + LOCK_STALE_MS;
+  while (Date.now() < deadline) {
+    try {
+      mkdirSync(LOCK);
+    } catch (e) {
+      if (e.code !== "EEXIST") throw e;
+      if (await cdpAlive()) return;
+      if (lockAge() > LOCK_STALE_MS) rmSync(LOCK, { recursive: true, force: true });
+      await sleep(500);
+      continue;
+    }
+    try {
+      return await fn();
+    } finally {
+      rmSync(LOCK, { recursive: true, force: true });
+    }
+  }
+  throw new Error("Timed out waiting for another process to bring up the browser");
+}
+
 /** Ensure a CDP-enabled browser is running. Prefers an existing browser
  *  (inherits login sessions), falls back to launching Chrome off-screen. */
-async function ensureCDP() {
+const ensureCDP = () => withBringupLock(bringUpCDP);
+
+async function bringUpCDP() {
   if (await cdpAlive()) return;
   if (await tryAttachRunning()) return;
   if (launched) throw new Error("Launched Chrome but CDP never came up");
