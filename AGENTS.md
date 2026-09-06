@@ -80,8 +80,17 @@ rendering strips bare tags before `innerText` sees them.
 
 ## browser prereqs
 
+CDP bring-up is automatic. On first use, `ensureCDP()` detects Arc (or Chrome),
+quits it gracefully (AppleScript, then `pkill` fallback), and relaunches it with
+`--remote-debugging-port=9222`. Arc restores its tabs. **Open channels are lost**
+during the restart — a warning is printed on stderr.
+
+Bring-up is serialized across concurrent processes via a lockdir at
+`~/.pi-chatgpt/cdp.lock`. A process that loses the race waits for CDP to come
+up rather than restarting again.
+
+To verify manually:
+
 ```bash
-# Arc with remote debugging (reuses existing ChatGPT session)
-open -a Arc --args --remote-debugging-port=9222
-curl -s http://127.0.0.1:9222/json/version  # verify
+curl -s http://127.0.0.1:9222/json/version
 ```

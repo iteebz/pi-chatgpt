@@ -36,7 +36,10 @@ A **channel** (`open`/`send`/`channels`/`close`) holds that conversation across
 CLI invocations. The browser tab is the whole store: state lives in a
 `sessionStorage` tag on the page, so there is no daemon, no session file, and
 nothing to reconcile — quitting the browser ends every channel. `consult` is
-`open` → `send` → `close` collapsed.
+`open` → `send` → `end` collapsed: it closes the tab after each call, so
+two concurrent consults never share a conversation and read each other’s
+replies as their own turn. Channels keep their tab alive across invocations;
+consults discard it.
 
 Temporary chats start **unpersonalized** and the choice locks at the first
 message — `Session({ personalize: true })` flips the composer pill during

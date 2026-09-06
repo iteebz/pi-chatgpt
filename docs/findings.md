@@ -30,11 +30,32 @@ room for the model to "help" by skipping tool calls.
 
 Three-tier fallback, fully automatic:
 1. CDP already running → attach
-2. Arc running → `open -na Arc --args --remote-debugging-port=9222` (inherits login)
+2. Arc (or Chrome) running → quit gracefully via AppleScript (pkill fallback if a modal blocks) → relaunch with `--remote-debugging-port=9222` — warns on stderr; open channels are lost
 3. Nothing → launch Chrome off-screen with persistent profile
+
+Bring-up is serialized across concurrent processes via a lockdir at
+`~/.pi-chatgpt/cdp.lock`. A process that loses the race waits for CDP to come
+up rather than triggering a second restart.
+
+macOS only applies `--args` at process start, so a browser already running
+without the flag has to be quit and relaunched — hence the restart rather than
+a simple `open -na` call against an already-running instance (which is a
+silent no-op).
 
 Arc attachment is the best path: inherits logged-in session, model access
 (Sol), and chat history. Chrome off-screen gets GPT-4o mini (no login).
+
+### Login detection and personalization
+
+The composer appearing is the proof of a logged-in, challenge-free session.
+If it never appears, the error now names the cause:
+- URL matches `/auth|login/` → `ChatGPT is not logged in (...). Sign in to chatgpt.com in your browser.`
+- Otherwise → `ChatGPT composer never appeared at ... — login wall or bot challenge.`
+
+Personalized temporary chats read memory and custom instructions. The pill that
+locks the choice is only present before the first message; if it stays visible
+after the click attempt (e.g. the menu didn’t open), a warning is written to
+stderr rather than silently losing memory for the turn.
 
 ### Thinking slider control
 
