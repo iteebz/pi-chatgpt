@@ -221,7 +221,7 @@ export class Session {
   }
 
   async #waitForTurn(before) {
-    const deadline = Date.now() + 60_000;
+    const deadline = Date.now() + this.timeoutMs;
     while (Date.now() < deadline) {
       if ((await this.#turnCount()) > before) return;
       await sleep(200);
@@ -316,24 +316,45 @@ function findChrome() {
   return null;
 }
 
-/** Try to attach CDP to a running browser that wasn't launched with the flag.
- *  macOS `open -na` with --args passes Chromium flags to a running app. */
+const running = (app) => {
+  try {
+    execSync(`pgrep -f "${app}.app/Contents/MacOS/"`, { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+async function waitCDP(ms) {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    if (await cdpAlive()) return true;
+    await sleep(300);
+  }
+  return false;
+}
+
+/** Bring up CDP on a browser holding the real ChatGPT login.
+ *
+ *  macOS only applies `--args` at process start, so a browser already running
+ *  without the flag has to be quit and relaunched. Arc restores its tabs. */
 async function tryAttachRunning() {
   for (const app of ["Arc", "Google Chrome"]) {
     if (!existsSync(`/Applications/${app}.app`)) continue;
     try {
-      execSync(
-        `open -na "${app}" --args --remote-debugging-port=${CDP_PORT}`,
-        { timeout: 5000, stdio: "ignore" },
-      );
-      // Wait for CDP
-      const deadline = Date.now() + 5000;
-      while (Date.now() < deadline) {
-        if (await cdpAlive()) {
-          process.stderr.write(`[pi-chatgpt] attached CDP to running ${app}\n`);
-          return true;
-        }
-        await sleep(300);
+      if (running(app)) {
+        process.stderr.write(`[pi-chatgpt] restarting ${app} with CDP on :${CDP_PORT}\n`);
+        execSync(`osascript -e 'quit app "${app}"'`, { timeout: 20_000, stdio: "ignore" });
+        for (let i = 0; i < 40 && running(app); i++) await sleep(500);
+        if (running(app)) continue;
+      }
+      execSync(`open -na "${app}" --args --remote-debugging-port=${CDP_PORT}`, {
+        timeout: 10_000,
+        stdio: "ignore",
+      });
+      if (await waitCDP(20_000)) {
+        process.stderr.write(`[pi-chatgpt] CDP attached to ${app}\n`);
+        return true;
       }
     } catch {}
   }
